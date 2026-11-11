@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Assistant brief, not package documentation
+Solar_data_analysis_project_definition.md
+
+# Event data and outputs (live in each event's basedir, never in the repository)
+*.fits
+*.fits.gz
+*.fts
+*.jp2
+*.npz
+*.nc
+*.p
+*.mp4
+*.png
+*.csv
+motion_cache/
+*_LAT_frames/
+LASCO/
+STEREO/
+SDO/
+PSP_WISPR/
+PFSS/
+GOES/
+NOAA_SRS/
+solar_data/
