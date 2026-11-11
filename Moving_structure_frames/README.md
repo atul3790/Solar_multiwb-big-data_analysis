@@ -119,7 +119,7 @@ Steps 1–3 build the motion cache, which is slow (downloads, alignment and flow
 | `track_coronagraph_flows.py` | Draws each frame: difference panel(s), contours, edge and centroid drift arrows coloured by speed, PFSS and AR lines, disk underlay, LAT/GOES curves. Writes the CSVs and MP4. | `render_frames`, `write_mp4` |
 | `puddle_analysis.py` | Signed full-field detection of bright and dark regions above a robust noise threshold, plus transport diagnostics | `detect_signed`, `usable_grid`, `outward_support`, `association` |
 | `edge_motion.py` | Samples the flow field along bright/dark contours and at region centroids | `sample_edge_motion`, `sample_centroid_motion`, `contour_pixels` |
-| `pfss_projection.py` | Selects AR closed loops and open lines. Loops can be rooted in the AR rectangle by one footpoint (long loops kept) or by both. | `select_ar_closed`, `select_ar_open` |
+| `pfss_projection.py` | Selects AR closed loops and open lines. Loops can be rooted in the AR rectangle by one footpoint (long loops kept) or by both. `ar_rooted_lines` does tracing, caching and selection in one call for the overlay makers. | `select_ar_closed`, `select_ar_open`, `ar_rooted_lines` |
 | `pfss_fixed_seeds.py` | Retraces one fixed set of Carrington seeds through each PFSS snapshot, so lines evolve smoothly between snapshots. Also traces AR seed patches. | `retrace_pfss`, `trace_ar_lines`, `select_trace_seeds` |
 | `solar_disk_layer.py` | Nearest EUVI or SDO image, reprojected into the coronagraph grid as a disk underlay | `disk_layer`, `nearest_disk`, `disk_inventory` |
 | `noaa_region.py` | Looks up a NOAA active region's position in the daily SRS reports, downloading them if missing | `find_NOAA_location` |
@@ -140,7 +140,7 @@ These are the less obvious ones; the guide above each INPUT block documents ever
 | `detect_sigma`, `detect_floor`, `bright_contrast` | Detection threshold, in sigma when a noise model is used |
 | `display_stretch`, `display_limit`, `display_smooth_px` | Display only (asinh stretch, grey-scale limit in sigma, smoothing). Detection is unaffected. |
 | `diff_panel` | `'both'`, `'base'` or `'running'` (COR2 + HI1: one panel) |
-| `ar_half_lon`, `ar_half_lat`, `AR_seed_spacing_deg` | AR rectangle (degrees about the NOAA centre) and seed spacing for AR field lines |
+| `ar_half_lon`, `ar_half_lat`, `AR_seed_spacing_deg` | AR rectangle (degrees about the NOAA centre) and seed spacing for AR field lines. Same settings in the flow launchers and the LASCO/STEREO overlay makers, which share one traced-line cache per PFSS snapshot (`PFSS/<snapshot>/AR_field_lines_rooted.npz`). |
 | `trace_longARrooted_loops` | 1 keeps closed loops with one footpoint in the AR rectangle, so long AR loops are shown. 0 needs both footpoints inside. |
 | `n_AR_open`, `n_closed`, `n_open` | Maximum magenta AR open lines, AR closed loops and global open lines drawn. Drawing only; cached lines are kept. |
 | `show_velocity_vectors` | 0 draws contours only, with the same layout. Vectors are still saved in the CSVs. |

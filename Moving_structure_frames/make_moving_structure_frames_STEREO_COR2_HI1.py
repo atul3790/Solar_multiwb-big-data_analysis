@@ -70,9 +70,9 @@ from combined_frame_pipeline import make_combined_frames
 
 #### Project, event and observations ####
 basedir='/path/to/event_folder'
-sT='2025-05-30T17:00:00'
-eT='2025-05-31T17:00:00'
-diff_panel='running'                 # 'running' or 'base'
+sT='2012-01-22T23:00:00'
+eT='2012-01-23T13:00:00'
+diff_panel='base'                 # 'running' or 'base'
 spacecraft_choice=1
 STEREO_root='STEREO'
 EUVI_fold='STEREO/STEREO_A/EUVI'
@@ -85,7 +85,7 @@ dT=600
 EUVI_dT=7200
 PFSS_dT=6.
 disk_max_minutes=120.
-base_diff_DT='2025-05-30T16:00:00'
+base_diff_DT='2012-01-22T22:00:00'
 max_image_dt=600
 reference_lookback=3600
 max_gap_seconds=1800
@@ -119,7 +119,7 @@ n_lat=18
 
 #### NOAA active region ####
 focus_AR=1
-NOAA_number=14100
+NOAA_number=11402
 AR_time=sT
 SRS_file='NOAA_SRS'  # NOAA SRS reports folder shared by all launchers and overlay makers; downloads saved here
 AR_lookup_max_age=36
@@ -216,7 +216,7 @@ display_limit=40         # Grey-scale +/- limit in sigma: a number, 'median' (of
                          # For display_stretch='linear', 'median' or 5-16 are good choices.
 display_smooth_px=1.5    # Gaussian smoothing (grid pixels) of the displayed image; 0 = off
 outdir='STEREO_LAT_frames'
-output_tag='_COR2-HI1rd_extGRE'
+output_tag='_COR2-HI1bd'
 
 ################################################
 

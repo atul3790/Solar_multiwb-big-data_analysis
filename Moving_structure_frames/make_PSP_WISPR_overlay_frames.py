@@ -44,8 +44,8 @@ import solar_overlay_helper as oh
 
 #################### INPUT #################################################
 basedir='/path/to/event_folder'  # Event folder: every relative path below is inside it; run from anywhere
-sT='2025-05-30T22:30:00'
-eT='2025-05-31T17:00:00'
+sT='2012-01-22T23:00:00'
+eT='2012-01-23T13:00:00'
 dT=600                              # WISPR output cadence in seconds
 detector='INNER'                    # 'INNER' or 'OUTER'
 img_folder='./PSP_WISPR'            # WISPR cache/download root

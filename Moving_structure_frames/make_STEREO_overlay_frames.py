@@ -32,11 +32,12 @@ import Multiwb_datamine as dm
 import datamine_calib_helper as dh
 import solar_overlay as so
 import solar_overlay_helper as oh
+from pfss_projection import ar_rooted_lines  # shared AR selection with the flow frames
 
 #################### INPUT #################################################
 basedir='/path/to/event_folder'  # Event folder: every relative path below is inside it; run from anywhere
-sT='2025-05-30T17:00:00'
-eT='2025-05-31T17:00:00'
+sT='2012-01-22T23:00:00'
+eT='2012-01-23T13:00:00'
 dT=600                             # COR images/output cadence, seconds
 spacecraft='A'                     # 'A' or 'B'
 instrument='COR2'                  # 'COR1' or 'COR2'
@@ -56,7 +57,7 @@ goes_folder='./GOES'  # GOES cache: read if present, downloads saved here. None:
 
 diff_type='base_diff'            # 'running_diff', 'base_diff', 'intensity'
 first_frame_intensity=False
-base_diff_DT='2025-05-30T16:00:00'   # Used only for base_diff
+base_diff_DT='2012-01-22T22:00:00'   # Used only for base_diff
 reference_search=3600              # Bounded reference-search window, seconds
 download=True                     # Fill missing image bins / PFSS snapshots
 helioviewer=True                   # Save/use separate original JP2 previews
@@ -73,20 +74,20 @@ n_lat=18
 
 ### Active-region PFSS tracing ####
 focus_AR=True                    # True: add AR-seeded traces
-NOAA_number=14100                  # Full NOAA AR number; if set, AR lon/lat are auto-read from NOAA SRS
+NOAA_number=11402                  # Full NOAA AR number; if set, AR lon/lat are auto-read from NOAA SRS
 SRS_file=None                      # Optional local NOAA SRS text file for offline use
 SRS_folder='./NOAA_SRS'            # NOAA SRS reports: read here, downloads saved here (shared with LASCO and flow codes)
 AR_lookup_max_age=36               # Maximum age (hours) for the NOAA region summary location
 AR_lon=None                        # Optional manual Stonyhurst longitude (deg, west + / east -)
 AR_lat=None                        # Optional manual Stonyhurst latitude (deg, north + / south -)
 AR_time=sT                         # UTC epoch for NOAA lookup and/or manual AR_lon/AR_lat
-AR_halfwidth_arcsec=400.           # Approx. angular half-width of AR seed patch at 1 AU
-AR_seed_spacing_arcsec=40.         # Patch seed spacing
-AR_nlon=None                       # None: derive from width/spacing; otherwise integer >=2
-AR_nlat=None
-AR_r_seed=1.01                     # Radius (Rsun) for low-lying AR field traces
-N_AR_closed=100                    # Maximum AR closed field lines (np.nan: all)
-N_AR_open=5                        # Max open AR lines drawn (magenta), spread evenly (np.nan: all)
+ar_half_lon=12.          # AR rectangle half-width in longitude, deg (Stonyhurst, about the NOAA centre)
+ar_half_lat=12.          # AR rectangle half-width in latitude, deg
+AR_seed_spacing_deg=1.   # Seed spacing over the AR rectangle, deg (+-12 deg at 1 deg = 25 x 25 seeds)
+trace_longARrooted_loops=1 # 1: loops with one footpoint in the rectangle (large AR loops kept); 0: both footpoints inside
+AR_r_seed=1.01           # AR trace start radius, Rsun
+n_closed=30              # Max AR closed loops drawn (tallest first with trace_longARrooted_loops=1); np.nan: all
+n_AR_open=5              # Max open AR field lines drawn (magenta), spread evenly; np.nan: all
 AR_closedB_col='lime'
 AR_openB_col='magenta'
 
@@ -97,7 +98,7 @@ observer_distance_au=None          # AU; None retains header/Horizons value
 nproc=2                           # Rendering workers; avoid high memory use
 npix=1024
 dpi=90
-N_closed=100                      # Maximum visible global closed field lines
+n_global_closed=20       # Global closed PFSS loops drawn
 closed_color='white'
 ###########################################################################
 
@@ -181,16 +182,6 @@ def _observer_label(observer):
 def _field_lines(folder):
 	return oh._load_pfss(folder)
 
-def _cap_open(lines,n):
-	"""Keep at most n open AR traces (pol != 0), spread evenly over the set, for drawing.
-	Closed traces are kept; n None or nan keeps all. Saved AR files are not changed."""
-	if lines is None or n is None or not np.isfinite(n):return lines
-	ids=np.unique(lines['seg'][lines['pol']!=0])
-	if len(ids)<=n:return lines
-	keep=~np.isin(lines['seg'],np.setdiff1d(ids,ids[np.linspace(0,len(ids),int(n),endpoint=False,dtype=int)]))
-	size=len(lines['seg'])
-	return {k:(v[keep] if isinstance(v,np.ndarray) and v.shape[:1]==(size,) else v) for k,v in lines.items()}
-
 @lru_cache(maxsize=3)
 def _ar_field_lines(path):
 	'''Load traced AR lines for a single saved PFSS snapshot.'''
@@ -199,127 +190,6 @@ def _ar_field_lines(path):
 		out['time']=Time(str(saved['time'].item()))
 		out['rss']=float(saved['rss'])
 	return out
-
-def _cache_AR_lines(folder,root,AR_lon,AR_lat,AR_time,AR_halfwidth_arcsec,
-	AR_seed_spacing_arcsec,AR_nlon,AR_nlat,AR_r_seed):
-	'''Trace once per PFSS model and save separately from the LASCO AR cache.'''
-	model=Path(folder)
-	cache=Path(root)/'AR_pfss'/model.name
-	cache.mkdir(parents=True,exist_ok=True)
-	path=cache/'AR_field_lines.npz'
-	settings_path=cache/'AR_settings.json'
-	settings=dict(model=str(model),model_mtime_ns=(model/'model_3d.npz').stat().st_mtime_ns,
-		lon=float(AR_lon),lat=float(AR_lat),time=Time(AR_time).isot,
-		halfwidth_arcsec=float(AR_halfwidth_arcsec),seed_spacing_arcsec=float(AR_seed_spacing_arcsec),
-		nlon=AR_nlon,nlat=AR_nlat,r_seed=float(AR_r_seed))
-	ready=path.is_file() and settings_path.is_file()
-	if ready:
-		try:ready=json.loads(settings_path.read_text())==settings
-		except (OSError,ValueError):ready=False
-	if not ready:
-		ar=trace_AR_database(model,AR_lon,AR_lat,AR_time,AR_halfwidth_arcsec,
-			AR_nlon,AR_nlat,AR_r_seed,AR_seed_spacing_arcsec)
-		np.savez_compressed(path,**{k:ar[k] for k in ('lon','lat','r','seg','pol')},
-			time=ar['time'].isot,rss=ar['rss'])
-		settings_path.write_text(json.dumps(settings,indent=2))
-	return str(path)
-
-def trace_AR_database(directory,lon,lat,epoch,halfwidth,nlon,nlat,radius,spacing=40.):
-	"""Trace extra seeds through the saved physical Bphi/Btheta/Br grid.
-
-	Returns lines in the existing overlay-helper format. This integrates the
-	saved field; it neither changes nor recomputes the PFSS magnetic model.
-	"""
-	folder=Path(directory)
-	meta=json.loads((folder/'metadata.json').read_text())
-	with np.load(folder/'model_3d.npz') as f:
-		phi=np.asarray(f['longitude_deg'],float)
-		sine=np.asarray(f['sin_latitude'],float)
-		r=np.asarray(f['radius_rsun'],float)
-		field=np.stack([f['Bphi'],f['Btheta'],f['Br']],axis=-1)
-	if field.shape[:3]!=(len(phi),len(sine),len(r)):
-		raise ValueError('Saved PFSS field dimensions do not match its coordinate axes')
-	if not (-180<=lon<=180 and -90<=lat<=90 and np.isfinite(halfwidth) and halfwidth>0 and r[0]<radius<r[-1]):
-		raise ValueError('Invalid AR coordinates, patch width or starting radius')
-	if not np.isfinite(spacing) or spacing<=0:
-		raise ValueError('AR seed spacing must be positive arcseconds')
-	nlon=int(np.ceil(2*halfwidth/spacing))+1 if nlon is None else nlon
-	nlat=int(np.ceil(2*halfwidth/spacing))+1 if nlat is None else nlat
-	if any(int(n)!=n or n<2 for n in (nlon,nlat)):
-		raise ValueError('AR seed counts must be integers >=2')
-	nlon,nlat=int(nlon),int(nlat)
-	order=np.argsort(phi%360)
-	phi=(phi%360)[order]
-	field=field[order]
-	# PFSS grids can include both endpoints of the same periodic meridian.
-	phi,unique=np.unique(np.round(phi,10),return_index=True)
-	field=field[unique]
-	phi=np.r_[phi[-1]-360,phi,phi[0]+360]
-	field=np.concatenate([field[-1:],field,field[:1]],axis=0)
-	interpolate=RegularGridInterpolator((np.deg2rad(phi),sine,r),field,
-		bounds_error=False,fill_value=None)
-	# Build an AR-centred patch on the solar surface; its seeds remain valid
-	# when the region is beyond Earth's limb but visible from STEREO.
-	# Angular size uses the solar apparent radius at 1 AU, independent of the
-	# current spacecraft distance. Convert fixed Stonyhurst seeds to Carrington.
-	unit_rsun=np.arctan2(R_sun.to_value(u.m),u.au.to(u.m))*180/np.pi*3600
-	dx,dy=np.meshgrid(np.linspace(-halfwidth,halfwidth,nlon),np.linspace(-halfwidth,halfwidth,nlat))
-	x,y=dx.ravel()/unit_rsun,dy.ravel()/unit_rsun
-	rho2=x*x+y*y
-	if np.any(rho2>=1):
-		raise ValueError('AR patch corners exceed one solar-radius projection; reduce AR_halfwidth_arcsec')
-	lon0,lat0=np.deg2rad([lon,lat])
-	center=np.array([np.cos(lat0)*np.cos(lon0),np.cos(lat0)*np.sin(lon0),np.sin(lat0)])
-	east=np.array([-np.sin(lon0),np.cos(lon0),0.])
-	north=np.array([-np.sin(lat0)*np.cos(lon0),-np.sin(lat0)*np.sin(lon0),np.cos(lat0)])
-	xyz=np.sqrt(1-rho2)[:,None]*center+x[:,None]*east+y[:,None]*north
-	seed_hgs_lon=np.rad2deg(np.arctan2(xyz[:,1],xyz[:,0]))
-	seed_hgs_lat=np.rad2deg(np.arcsin(np.clip(xyz[:,2],-1,1)))
-	patch=SkyCoord(seed_hgs_lon*u.deg,seed_hgs_lat*u.deg,R_sun,
-		frame=frames.HeliographicStonyhurst(obstime=Time(epoch)))
-	patch=patch.transform_to(frames.HeliographicCarrington(obstime=Time(epoch),observer='earth'))
-	seed_lon=patch.lon.to_value(u.rad)
-	seed_sine=np.sin(patch.lat.to_value(u.rad))
-	valid=np.isfinite(seed_lon)&np.isfinite(seed_sine)
-	seed_lon,seed_sine=seed_lon[valid],seed_sine[valid]
-	if not len(seed_lon):
-		raise ValueError('AR patch has no finite photospheric seed positions')
-	print(f'AR grid: {nlon} x {nlat}; {len(seed_lon)} photospheric seeds; half-width {halfwidth:g} arcsec')
-	def direction(length,q):
-		p,s,rr=q
-		s=np.clip(s,-0.999999,0.999999)
-		b=np.asarray(interpolate([[p%(2*np.pi),s,np.clip(rr,r[0],r[-1])]]))[0]
-		norm=np.linalg.norm(b)
-		if not np.isfinite(norm) or norm<1e-20:
-			return np.zeros(3)
-		c=np.sqrt(1-s*s)
-		return np.array([b[0]/(rr*c),-c*b[1]/rr,b[2]])/norm
-	def surface(length,q):
-		return (q[2]-r[0])*(r[-1]-q[2])
-	surface.terminal=True
-	surface.direction=-1
-	result={k:[] for k in ('lon','lat','r','seg','pol')}
-	for i,(p,s) in enumerate(zip(seed_lon,seed_sine)):
-		branches=[]
-		for sign in (-1,1):
-			sol=solve_ivp(lambda l,q:sign*direction(l,q),(0,100),[p,s,radius],
-				events=surface,max_step=0.025,rtol=1e-5,atol=1e-7)
-			branches.append(sol.y.T)
-		# Discard paths that failed to reach either physical boundary.
-		if any(min(abs(b[-1,2]-r[0]),abs(b[-1,2]-r[-1]))>1e-3 for b in branches):
-			continue
-		q=np.concatenate([branches[0][::-1],branches[1][1:]])
-		open_line=np.any(q[:,2]>=r[-1]-1e-3)
-		pol=int(np.sign(direction(0,[p,s,radius])[2])) if open_line else 0
-		for k,v in [('lon',np.rad2deg(q[:,0])%360),('lat',np.rad2deg(np.arcsin(np.clip(q[:,1],-1,1)))),
-			('r',q[:,2]),('seg',np.full(len(q),i)),('pol',np.full(len(q),pol))]:
-			result[k].append(v)
-	if not result['lon']:
-		raise RuntimeError('No AR traces reached the PFSS boundaries')
-	result={k:np.concatenate(v) for k,v in result.items()}
-	result.update(time=Time(meta['model_time']),rss=float(meta['rss']))
-	return result
-
 
 def find_NOAA_location(number,requested,cache_dir,local_file=None,max_age=36):
 	"""Return Stonyhurst lon, lat, validity epoch and NOAA SRS provenance."""
@@ -392,10 +262,10 @@ def _draw_stereo_pfss(ax,tmap,observer,model,cfg):
 	# The helper transforms Carrington points into the target HPC WCS, including
 	# the observer's longitude, latitude and distance. No longitude offset or
 	# image-plane rotation is applied to the saved field.
-	oh._draw_pfss(ax,tmap,_field_lines(model),N_Bloop=cfg['N_closed'],
+	oh._draw_pfss(ax,tmap,_field_lines(model),N_Bloop=cfg['n_global_closed'],
 		colors={0:cfg['closed_color'],1:cfg['open_positive_color'],-1:cfg['open_negative_color']})
 	if cfg.get('ar_model') is not None:
-		oh._draw_pfss(ax,tmap,_cap_open(_ar_field_lines(cfg['ar_model']),cfg.get('N_AR_open')),N_Bloop=cfg['N_AR_closed'],
+		oh._draw_pfss(ax,tmap,_ar_field_lines(cfg['ar_model']),N_Bloop=np.nan,  # already selected and capped
 			colors={0:cfg['AR_closedB_col'],1:cfg['AR_openB_col'],-1:cfg['AR_openB_col']})
 
 
@@ -501,12 +371,12 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 	first_frame_intensity=True,base_diff_DT=None,reference_search=3600,polar=0,
 	download=True,helioviewer=True,need_pfss=True,pfss_dir='./PFSS',PFSS_dT=6.,
 	pfss_kwargs=None,observer_location=None,observer_latitude=None,observer_distance_au=None,
-	nproc=2,npix=1024,dpi=90,N_closed=100,closed_color='yellow',
+	nproc=2,npix=1024,dpi=90,n_global_closed=20,closed_color='yellow',
 	open_positive_color='red',open_negative_color='cyan',need_GOES=True,flux_csv=None,
 	EUVI_needed=False,EUVI_wave=195,EUVI_dT=7200,EUVI_radius=1.3,EUVI_BW=False,
-	focus_AR=False,AR_lon=None,AR_lat=None,AR_time=None,AR_halfwidth_arcsec=400.,
-	AR_seed_spacing_arcsec=40.,AR_nlon=None,AR_nlat=None,AR_r_seed=1.01,
-	N_AR_closed=100,N_AR_open=5,AR_closedB_col='lime',AR_openB_col='magenta',goes_pickle=None,goes_folder=None,SRS_folder=None,
+	focus_AR=False,AR_lon=None,AR_lat=None,AR_time=None,ar_half_lon=12.,
+	ar_half_lat=12.,AR_seed_spacing_deg=1.,trace_longARrooted_loops=1,AR_r_seed=1.01,
+	n_closed=30,n_AR_open=5,AR_closedB_col='lime',AR_openB_col='magenta',goes_pickle=None,goes_folder=None,SRS_folder=None,
 		NOAA_number=None,SRS_file=None,AR_lookup_max_age=36):
 	'''COR1/COR2 intensity/difference frames with PFSS in the spacecraft viewpoint.
 
@@ -542,10 +412,8 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 	resolved_ar=None
 	if focus_AR:
 		if not need_pfss:raise ValueError('focus_AR=True requires need_pfss=True')
-		if AR_halfwidth_arcsec<=0 or AR_seed_spacing_arcsec<=0 or AR_r_seed<=1:
-			raise ValueError('AR patch size/spacing must be positive, AR_r_seed >1 Rsun')
-		if AR_nlon is not None and (int(AR_nlon)!=AR_nlon or AR_nlon<2):raise ValueError('AR_nlon must be None or an integer >=2')
-		if AR_nlat is not None and (int(AR_nlat)!=AR_nlat or AR_nlat<2):raise ValueError('AR_nlat must be None or an integer >=2')
+		if min(ar_half_lon,ar_half_lat,AR_seed_spacing_deg)<=0 or AR_r_seed<=1:
+			raise ValueError('AR rectangle and seed spacing must be positive, AR_r_seed >1 Rsun')
 		AR_time=Time(AR_time or sT).isot
 		if NOAA_number is not None:
 			AR_lon,AR_lat,AR_time,resolved_ar=find_NOAA_location(int(NOAA_number),AR_time,Path(SRS_folder).expanduser().resolve() if SRS_folder else root/'NOAA_SRS',SRS_file,AR_lookup_max_age)
@@ -616,8 +484,12 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 				so.build_pfss(epoch.isot,epoch.isot,folder,**kwargs)
 			models.append((epoch,str(folder)))
 			if focus_AR:
-				ar_models[str(folder)]=_cache_AR_lines(folder,root,AR_lon,AR_lat,AR_time,
-					AR_halfwidth_arcsec,AR_seed_spacing_arcsec,AR_nlon,AR_nlat,AR_r_seed)
+				# Same AR rectangle, shared cache (PFSS/<snapshot>/AR_field_lines_rooted.npz) and selection as the flow frames.
+				sel=ar_rooted_lines(folder,AR_lon,AR_lat,AR_time,ar_half_lon,ar_half_lat,AR_seed_spacing_deg,AR_r_seed,
+					NOAA_number or 0,bool(trace_longARrooted_loops),n_closed,n_AR_open)
+				out=root/'AR_pfss'/folder.name;out.mkdir(parents=True,exist_ok=True)
+				np.savez_compressed(out/'AR_selected.npz',**{k:sel[k] for k in ('lon','lat','r','seg','pol')},time=sel['time'].isot,rss=sel['rss'])
+				ar_models[str(folder)]=str(out/'AR_selected.npz')
 	if focus_AR:
 		with (root/'AR_trace_sources.csv').open('w',newline='') as stream:
 			writer=csv.writer(stream);writer.writerow(['PFSS_model','AR_trace_file','AR_lon_deg','AR_lat_deg','AR_epoch','NOAA_number'])
@@ -626,10 +498,10 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 		if resolved_ar is not None:meta.update(resolved_ar)
 		(root/'AR_location_used.json').write_text(json.dumps(meta,indent=2))
 	cfg=dict(spacecraft=spacecraft,instrument=instrument,outdir=str(root),diff_type=diff_type,
-		npix=npix,dpi=dpi,N_closed=N_closed,closed_color=closed_color,
+		npix=npix,dpi=dpi,n_global_closed=n_global_closed,closed_color=closed_color,
 		open_positive_color=open_positive_color,open_negative_color=open_negative_color,
 		r_inner=1.4 if instrument=='COR1' else 2.5,r_outer=4. if instrument=='COR1' else 15.,
-		N_AR_closed=N_AR_closed,N_AR_open=N_AR_open,AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col)
+		AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col)
 	euvi_rows=[];euvi_log=[]
 	if EUVI_needed:
 		euvi_rows=stereo_cache(img_folder,spacecraft,'EUVI',wave=EUVI_wave)
@@ -869,10 +741,10 @@ if __name__=='__main__':
 			'final_image_folder','diff_type','first_frame_intensity','base_diff_DT',
 			'reference_search','download','helioviewer','need_pfss','pfss_dir','PFSS_dT',
 			'pfss_kwargs','observer_location','observer_latitude','observer_distance_au',
-			'nproc','npix','dpi','N_closed','closed_color','open_positive_color',
+			'nproc','npix','dpi','n_global_closed','closed_color','open_positive_color',
 			'open_negative_color','need_GOES','flux_csv','goes_pickle','goes_folder','EUVI_needed','EUVI_wave','EUVI_dT','EUVI_radius','EUVI_BW',
-			'focus_AR','NOAA_number','SRS_file','SRS_folder','AR_lookup_max_age','AR_lon','AR_lat','AR_time','AR_halfwidth_arcsec','AR_seed_spacing_arcsec',
-			'AR_nlon','AR_nlat','AR_r_seed','N_AR_closed','N_AR_open','AR_closedB_col','AR_openB_col')}
+			'focus_AR','NOAA_number','SRS_file','SRS_folder','AR_lookup_max_age','AR_lon','AR_lat','AR_time','ar_half_lon','ar_half_lat',
+			'AR_seed_spacing_deg','trace_longARrooted_loops','AR_r_seed','n_closed','n_AR_open','AR_closedB_col','AR_openB_col')}
 
 		paths=module.make_STEREO_frames(**settings)
 		print('Saved',len(paths),'STEREO PNG frames')

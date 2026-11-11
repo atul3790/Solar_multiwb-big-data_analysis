@@ -187,8 +187,8 @@ from motion_frame_pipeline_V1 import make_frames_V1
 
 #### Project, event and observations ####
 basedir='/path/to/event_folder'
-sT='2025-05-30T17:00:00'
-eT='2025-05-31T07:00:00'
+sT='2012-01-22T23:00:00'
+eT='2012-01-23T13:00:00'
 spacecraft_choice=1
 instrument_choice=2
 coronagraph_imgfolder='STEREO/STEREO_A/COR2'
@@ -203,7 +203,7 @@ dT=600
 EUVI_dT=7200
 PFSS_dT=6.
 disk_max_minutes=120.
-base_diff_DT='2025-05-30T16:00:00'
+base_diff_DT='2012-01-22T22:00:00'
 max_image_dt=600
 reference_lookback=3600
 max_gap_seconds=1800
@@ -220,7 +220,7 @@ n_lat=18
 
 #### NOAA active region ####
 focus_AR=1
-NOAA_number=14100
+NOAA_number=11402
 AR_time=sT
 SRS_file='NOAA_SRS'  # NOAA SRS reports folder shared by all launchers and overlay makers; downloads saved here
 AR_lookup_max_age=36
