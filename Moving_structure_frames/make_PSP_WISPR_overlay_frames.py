@@ -43,9 +43,9 @@ import solar_overlay as so
 import solar_overlay_helper as oh
 
 #################### INPUT #################################################
-basedir='/path/to/event_folder'  # Event folder: every relative path below is inside it; run from anywhere
-sT='2012-01-22T23:00:00'
-eT='2012-01-23T13:00:00'
+basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
+sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC
+eT='YYYY-MM-DDThh:mm:ss'  # Event end, UTC
 dT=600                              # WISPR output cadence in seconds
 detector='INNER'                    # 'INNER' or 'OUTER'
 img_folder='./PSP_WISPR'            # WISPR cache/download root
@@ -531,6 +531,8 @@ def make_PSP_WISPR_overlay_frames(sT,eT,dT,detector='INNER',img_folder='./PSP_WI
 
 
 if __name__=='__main__':
+	_unset=[k for k in ('basedir','sT','eT','base_diff_DT') if k in globals() and ('YYYY' in str(globals()[k]) or str(globals()[k]).startswith('/path/to'))]
+	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
 	import os
 	cwd=os.getcwd()
 	os.chdir(basedir)  # all relative paths are inside the event folder

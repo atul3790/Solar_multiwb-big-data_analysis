@@ -35,9 +35,9 @@ import solar_overlay_helper as oh
 from pfss_projection import ar_rooted_lines  # shared AR selection with the flow frames
 
 #################### INPUT #################################################
-basedir='/path/to/event_folder'  # Event folder: every relative path below is inside it; run from anywhere
-sT='2012-01-22T23:00:00'
-eT='2012-01-23T13:00:00'
+basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
+sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC
+eT='YYYY-MM-DDThh:mm:ss'  # Event end, UTC
 dT=600                             # COR images/output cadence, seconds
 spacecraft='A'                     # 'A' or 'B'
 instrument='COR2'                  # 'COR1' or 'COR2'
@@ -57,7 +57,7 @@ goes_folder='./GOES'  # GOES cache: read if present, downloads saved here. None:
 
 diff_type='base_diff'            # 'running_diff', 'base_diff', 'intensity'
 first_frame_intensity=False
-base_diff_DT='2012-01-22T22:00:00'   # Used only for base_diff
+base_diff_DT='YYYY-MM-DDThh:mm:ss'  # Quiet base-difference reference, UTC, at or before sT
 reference_search=3600              # Bounded reference-search window, seconds
 download=True                     # Fill missing image bins / PFSS snapshots
 helioviewer=True                   # Save/use separate original JP2 previews
@@ -74,7 +74,7 @@ n_lat=18
 
 ### Active-region PFSS tracing ####
 focus_AR=True                    # True: add AR-seeded traces
-NOAA_number=11402                  # Full NOAA AR number; if set, AR lon/lat are auto-read from NOAA SRS
+NOAA_number=None  # Set the NOAA active-region number (e.g. 11402) when focus_AR is on
 SRS_file=None                      # Optional local NOAA SRS text file for offline use
 SRS_folder='./NOAA_SRS'            # NOAA SRS reports: read here, downloads saved here (shared with LASCO and flow codes)
 AR_lookup_max_age=36               # Maximum age (hours) for the NOAA region summary location
@@ -727,6 +727,8 @@ def save_lightcurve_frames(frames,goes,flux_csv,sT,eT,outdir,
 	return written
 
 if __name__=='__main__':
+	_unset=[k for k in ('basedir','sT','eT','base_diff_DT') if k in globals() and ('YYYY' in str(globals()[k]) or str(globals()[k]).startswith('/path/to'))]
+	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
 	import os
 	cwd=os.getcwd()
 	os.chdir(basedir)  # all relative paths are inside the event folder

@@ -69,9 +69,9 @@ from combined_frame_pipeline import make_combined_frames
 #################### INPUT ####################
 
 #### Project, event and observations ####
-basedir='/path/to/event_folder'
-sT='2012-01-22T23:00:00'
-eT='2012-01-23T13:00:00'
+basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
+sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC
+eT='YYYY-MM-DDThh:mm:ss'  # Event end, UTC
 diff_panel='base'                 # 'running' or 'base'
 spacecraft_choice=1
 STEREO_root='STEREO'
@@ -85,7 +85,7 @@ dT=600
 EUVI_dT=7200
 PFSS_dT=6.
 disk_max_minutes=120.
-base_diff_DT='2012-01-22T22:00:00'
+base_diff_DT='YYYY-MM-DDThh:mm:ss'  # Quiet base-difference reference, UTC, at or before sT
 max_image_dt=600
 reference_lookback=3600
 max_gap_seconds=1800
@@ -119,7 +119,7 @@ n_lat=18
 
 #### NOAA active region ####
 focus_AR=1
-NOAA_number=11402
+NOAA_number=None  # Set the NOAA active-region number (e.g. 11402) when focus_AR is on
 AR_time=sT
 SRS_file='NOAA_SRS'  # NOAA SRS reports folder shared by all launchers and overlay makers; downloads saved here
 AR_lookup_max_age=36
@@ -216,11 +216,13 @@ display_limit=40         # Grey-scale +/- limit in sigma: a number, 'median' (of
                          # For display_stretch='linear', 'median' or 5-16 are good choices.
 display_smooth_px=1.5    # Gaussian smoothing (grid pixels) of the displayed image; 0 = off
 outdir='STEREO_LAT_frames'
-output_tag='_COR2-HI1bd'
+output_tag=''  # Optional suffix for the output folder name
 
 ################################################
 
 if __name__=='__main__':
+	_unset=[k for k in ('basedir','sT','eT','base_diff_DT') if k in globals() and ('YYYY' in str(globals()[k]) or str(globals()[k]).startswith('/path/to'))]
+	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
 	plot_style=dict(xlabel=xlabel,ylabel=ylabel,xticks=xticks,yticks=yticks,
 		xlabel_size=xlabel_size,ylabel_size=ylabel_size,xtick_size=xtick_size,ytick_size=ytick_size,
 		title=title,title_size=title_size,subtitle_size=subtitle_size,base_title=base_title,

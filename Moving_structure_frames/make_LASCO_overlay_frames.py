@@ -34,14 +34,14 @@ import datamine_calib_helper as dh
 import Multiwb_datamine as dm
 
 #################### INPUT ##################################################################
-basedir='/path/to/event_folder'  # Event folder: every relative path below is inside it; run from anywhere
-sT='2012-01-22T23:00:00'
-eT='2012-01-23T13:00:00'
+basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
+sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC
+eT='YYYY-MM-DDThh:mm:ss'  # Event end, UTC
 dT=600                             # LASCO and output frame cadence, seconds
 SDO_dT=7200                        # AIA/HMI download and coverage cadence, seconds
 diff_type='base_diff'            # 'running_diff' or 'base_diff'
 first_frame_intensity=False        # True: first frame is actual LASCO; False: difference
-base_diff_DT='2012-01-22T22:00:00'  # UTC base-reference time; used only for base_diff
+base_diff_DT='YYYY-MM-DDThh:mm:ss'  # Quiet base-difference reference, UTC, at or before sT
 LASCO='C3'						# Which LASCO coronagraph to use
 LASCO_imgfolder='./LASCO/C3'    # Path to LASCO database within which C2 image folder either exist or should be save into, searched recursively
 SDO_fold='./SDO'                     # SDO database root, searched recursively
@@ -68,7 +68,7 @@ n_lat=18
 #############
 ### INPUT for AR region - focussed PFSS line drawing ####
 focus_AR=True                      # True: add AR traces; False: global PFSS only
-NOAA_number=11402                   # Full NOAA number required only when focus_AR=True
+NOAA_number=None  # Set the NOAA active-region number (e.g. 11402) when focus_AR is on
 AR_time=sT                          # Requested lookup epoch (UTC)
 ar_half_lon=12.          # AR rectangle half-width in longitude, deg (Stonyhurst, about the NOAA centre)
 ar_half_lat=12.          # AR rectangle half-width in latitude, deg
@@ -509,6 +509,8 @@ def _render_lightcurve_frame(task):
 		settings['sT'],settings['eT'],Path(settings['final_image_folder']).expanduser(),dpi=settings['dpi'])
 
 if __name__=='__main__':
+	_unset=[k for k in ('basedir','sT','eT','base_diff_DT') if k in globals() and ('YYYY' in str(globals()[k]) or str(globals()[k]).startswith('/path/to'))]
+	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
 	import os
 	cwd=os.getcwd()
 	os.chdir(basedir)  # all relative paths are inside the event folder
