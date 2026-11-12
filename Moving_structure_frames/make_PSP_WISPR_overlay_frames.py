@@ -348,7 +348,12 @@ def save_lightcurve_frames(frames,goes,flux_csv,sT,eT,outdir,
 						xerr=ul['time_error_seconds'].to_numpy()/86400 if 'time_error_seconds' in ul else None,uplims=True,
 						fmt='v',color='blue',ms=5,capsize=3,lw=1,label='LAT upper limit')
 				ax.set_yscale('log')
-				ax.set_ylim(1e-8,1e-4)
+				err=lambda side:lat.get(f'flux_error_{side}',lat.get('flux_error',0.))
+				lo,hi=(lat['flux']-err('lower')).where(lambda x:x>0,lat['flux']).min(),(lat['flux']+err('upper')).max()
+				e10=lambda x:10**np.floor(np.log10(x))  # decade of x
+				if np.isfinite(lo) and np.isfinite(hi) and 0<lo<=hi:  # flux -+ error, rounded out to 1 or 5 x 10^n
+					m=hi/e10(hi);ax.set_ylim((5 if lo/e10(lo)>=5 else 1)*e10(lo),(1 if m<=1 else 5 if m<=5 else 10)*e10(hi))
+				else:ax.set_ylim(1e-8,1e-4)
 				ax.set_ylabel(flux_ylabel,fontsize=17)
 			ax.axvline(stamp,color='black',ls='--',lw=1.5)
 			ax.text(0.02,0.97,stamp.strftime('%Y-%m-%d %H:%M:%S UT'),
