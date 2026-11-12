@@ -86,6 +86,7 @@ ar_half_lon=12.          # AR rectangle half-width in longitude, deg (Stonyhurst
 ar_half_lat=12.          # AR rectangle half-width in latitude, deg
 AR_seed_spacing_deg=1.   # Seed spacing over the AR rectangle, deg (+-12 deg at 1 deg = 25 x 25 seeds)
 trace_longARrooted_loops=1 # 1: loops with one footpoint in the rectangle (large AR loops kept); 0: both footpoints inside
+AR_loop_reach_deg=50.   # Closed AR loops need both ends within this distance (deg on the Sun) of the NOAA centre: keeps AR-quiet Sun and AR-AR connectors, drops longer PFSS loops (e.g. to the polar caps); '' = no limit
 AR_r_seed=1.01           # AR trace start radius, Rsun
 n_closed=30              # Max AR closed loops drawn (tallest first with trace_longARrooted_loops=1); np.nan: all
 n_AR_open=5              # Max open AR field lines drawn (magenta), spread evenly; np.nan: all
@@ -376,7 +377,7 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 	open_positive_color='red',open_negative_color='cyan',need_GOES=True,flux_csv=None,
 	EUVI_needed=False,EUVI_wave=195,EUVI_dT=7200,EUVI_radius=1.3,EUVI_BW=False,
 	focus_AR=False,AR_lon=None,AR_lat=None,AR_time=None,ar_half_lon=12.,
-	ar_half_lat=12.,AR_seed_spacing_deg=1.,trace_longARrooted_loops=1,AR_r_seed=1.01,
+	ar_half_lat=12.,AR_seed_spacing_deg=1.,trace_longARrooted_loops=1,AR_r_seed=1.01,AR_loop_reach_deg=None,
 	n_closed=30,n_AR_open=5,AR_closedB_col='lime',AR_openB_col='magenta',goes_pickle=None,goes_folder=None,SRS_folder=None,
 		NOAA_number=None,SRS_file=None,AR_lookup_max_age=36):
 	'''COR1/COR2 intensity/difference frames with PFSS in the spacecraft viewpoint.
@@ -487,7 +488,8 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 			if focus_AR:
 				# Same AR rectangle, shared cache (PFSS/<snapshot>/AR_field_lines_rooted.npz) and selection as the flow frames.
 				sel=ar_rooted_lines(folder,AR_lon,AR_lat,AR_time,ar_half_lon,ar_half_lat,AR_seed_spacing_deg,AR_r_seed,
-					NOAA_number or 0,bool(trace_longARrooted_loops),n_closed,n_AR_open)
+					NOAA_number or 0,bool(trace_longARrooted_loops),n_closed,n_AR_open,
+					reach_deg=None if AR_loop_reach_deg in ('',None) else float(AR_loop_reach_deg))
 				out=root/'AR_pfss'/folder.name;out.mkdir(parents=True,exist_ok=True)
 				np.savez_compressed(out/'AR_selected.npz',**{k:sel[k] for k in ('lon','lat','r','seg','pol')},time=sel['time'].isot,rss=sel['rss'])
 				ar_models[str(folder)]=str(out/'AR_selected.npz')
@@ -732,7 +734,7 @@ if __name__=='__main__':
 	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
 	if save_PFSS_maps:  # AR + full-Sun PFSS maps at the sT-eT midpoint, saved in basedir
 		import solar_overlay as _so;from astropy.time import Time as _T
-		try:_so.pfss_context_maps((_T(sT)+(_T(eT)-_T(sT))/2).isot,'STEREO-'+spacecraft,'EUVI',EUVI_wave,img_folder=img_folder,basedir=basedir,pfss_dir=pfss_dir,rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,PFSS_dT=PFSS_dT,SRS_folder=SRS_folder,NOAA_number=NOAA_number if focus_AR else None,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,AR_seed_spacing_deg=AR_seed_spacing_deg,trace_longARrooted_loops=bool(trace_longARrooted_loops),AR_r_seed=AR_r_seed,n_closed=n_closed,n_AR_open=None if n_AR_open in ('',None) or n_AR_open!=n_AR_open else int(n_AR_open),n_global_closed=n_global_closed,AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col,maps='both' if save_PFSS_maps is True else save_PFSS_maps)
+		try:_so.pfss_context_maps((_T(sT)+(_T(eT)-_T(sT))/2).isot,'STEREO-'+spacecraft,'EUVI',EUVI_wave,img_folder=img_folder,basedir=basedir,pfss_dir=pfss_dir,rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,PFSS_dT=PFSS_dT,SRS_folder=SRS_folder,NOAA_number=NOAA_number if focus_AR else None,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,AR_seed_spacing_deg=AR_seed_spacing_deg,trace_longARrooted_loops=bool(trace_longARrooted_loops),AR_r_seed=AR_r_seed,n_closed=n_closed,n_AR_open=None if n_AR_open in ('',None) or n_AR_open!=n_AR_open else int(n_AR_open),n_global_closed=n_global_closed,AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col,maps='both' if save_PFSS_maps is True else save_PFSS_maps,AR_loop_reach_deg=None if AR_loop_reach_deg=='' else float(AR_loop_reach_deg))
 		except Exception as exc:print('PFSS maps not saved:',exc)
 	import os
 	cwd=os.getcwd()
@@ -751,7 +753,7 @@ if __name__=='__main__':
 			'nproc','npix','dpi','n_global_closed','closed_color','open_positive_color',
 			'open_negative_color','need_GOES','flux_csv','goes_pickle','goes_folder','EUVI_needed','EUVI_wave','EUVI_dT','EUVI_radius','EUVI_BW',
 			'focus_AR','NOAA_number','SRS_file','SRS_folder','AR_lookup_max_age','AR_lon','AR_lat','AR_time','ar_half_lon','ar_half_lat',
-			'AR_seed_spacing_deg','trace_longARrooted_loops','AR_r_seed','n_closed','n_AR_open','AR_closedB_col','AR_openB_col')}
+			'AR_seed_spacing_deg','trace_longARrooted_loops','AR_loop_reach_deg','AR_r_seed','n_closed','n_AR_open','AR_closedB_col','AR_openB_col')}
 
 		paths=module.make_STEREO_frames(**settings)
 		print('Saved',len(paths),'STEREO PNG frames')

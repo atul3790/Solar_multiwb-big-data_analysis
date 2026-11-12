@@ -105,7 +105,7 @@ def frame_map(ref,t,item):
 def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_region_span_rsun=None,
 	panel_keys=('base_difference','running_difference'),display_limit=None,
 	display_stretch='linear',display_soft=1.,display_smooth_px=0.,ar_seed_spacing_deg=None,ar_long_loops=True,show_vectors=True,n_AR_open=None,
-	detect_smooth_px=1.5,bright_contrast_snr=False,region_min_width_rsun=0.,region_max_aspect=None,
+	detect_smooth_px=1.5,bright_contrast_snr=False,region_min_width_rsun=0.,region_max_aspect=None,ar_loop_reach_deg=None,
 	AR_halfwidth_arcsec=400., AR_seed_spacing_arcsec=40., AR_r_seed=1.01,
 	sT, eT, LASCO, SDO_fold, EUVI_fold, pfss_dir, outdir,
 	final_image_folder, SDO_instrument, SDO_product, EUVI_wave, focus_AR, NOAA_number, AR_time,
@@ -132,6 +132,8 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	n_closed); False needs both footpoints inside. All traced lines are cached
 	as AR_field_lines_rooted.npz (selection applied at drawing), reused only for
 	the same rectangle and spacing, so the toggle needs no retrace.
+	ar_loop_reach_deg: closed AR loops need both ends within this distance (deg)
+	of the NOAA centre; None: no limit (pfss_projection.select_ar_closed).
 
 	Detection (puddle_analysis.detect_signed): detect_smooth_px smooths before
 	thresholding. bright_contrast_snr=True makes bright_contrast a unitless local
@@ -241,7 +243,7 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 					warnings.warn(f'AR tracing failed ({exc}); selecting AR lines from the global PFSS lines.')
 					ar=fields
 			use_ar_cache=ar_source is not None
-			closed=select_ar_closed(ar,ref,model_epoch,c.lon.deg,c.lat.deg,ar_half_lon,ar_half_lat,ar_half_box_arcsec,n_closed,ar_rule)
+			closed=select_ar_closed(ar,ref,model_epoch,c.lon.deg,c.lat.deg,ar_half_lon,ar_half_lat,ar_half_box_arcsec,n_closed,ar_rule,ar_loop_reach_deg)
 			opened=select_ar_open(ar,model_epoch,c.lon.deg,c.lat.deg,ar_half_lon,ar_half_lat,ar_half_box_arcsec)
 			ar_keep=closed|opened
 			ar_fields={k:ar[k][ar_keep] for k in keys}|{'rss':fields['rss']}

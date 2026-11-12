@@ -229,6 +229,7 @@ ar_half_lon=12.          # AR rectangle half-width in longitude, deg
 ar_half_lat=12.          # AR rectangle half-width in latitude, deg
 AR_seed_spacing_deg=1.   # Seed spacing over the AR rectangle, deg
 trace_longARrooted_loops=1 # 1: loops with one footpoint in the rectangle (large AR loops kept); 0: both footpoints inside
+AR_loop_reach_deg=50.   # Closed AR loops need both ends within this distance (deg on the Sun) of the NOAA centre: keeps AR-quiet Sun and AR-AR connectors, drops longer PFSS loops (e.g. to the polar caps); '' = no limit
 n_AR_open=5              # Max open AR field lines drawn (magenta), spread evenly; '' draws all
 AR_r_seed=1.01 # AR trace start radius, Rsun
 
@@ -335,7 +336,7 @@ if __name__=='__main__':
 	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
 	if save_PFSS_maps:  # AR + full-Sun PFSS maps at the sT-eT midpoint, saved in basedir
 		import solar_overlay as _so;from astropy.time import Time as _T
-		try:_so.pfss_context_maps((_T(sT)+(_T(eT)-_T(sT))/2).isot,'STEREO-'+{1:'A',2:'B'}.get(spacecraft_choice,'A'),'EUVI' if EUVI_fold else None,EUVI_wave,img_folder=EUVI_fold.split('/STEREO_')[0] if EUVI_fold else None,basedir=basedir,pfss_dir=pfss_dir,rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,PFSS_dT=PFSS_dT or 6.,gong_cache=gong_cache,SRS_folder=SRS_file,closed_field_color=closed_field_color,NOAA_number=NOAA_number if focus_AR else None,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,AR_seed_spacing_deg=AR_seed_spacing_deg,trace_longARrooted_loops=bool(trace_longARrooted_loops),AR_r_seed=AR_r_seed,n_closed=n_closed,n_AR_open=None if n_AR_open in ('',None) or n_AR_open!=n_AR_open else int(n_AR_open),n_global_closed=n_global_closed,AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col,maps='both' if save_PFSS_maps is True else save_PFSS_maps,max_image_dt=float(disk_max_minutes or 60)*60)
+		try:_so.pfss_context_maps((_T(sT)+(_T(eT)-_T(sT))/2).isot,'STEREO-'+{1:'A',2:'B'}.get(spacecraft_choice,'A'),'EUVI' if EUVI_fold else None,EUVI_wave,img_folder=EUVI_fold.split('/STEREO_')[0] if EUVI_fold else None,basedir=basedir,pfss_dir=pfss_dir,rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,PFSS_dT=PFSS_dT or 6.,gong_cache=gong_cache,SRS_folder=SRS_file,closed_field_color=closed_field_color,NOAA_number=NOAA_number if focus_AR else None,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,AR_seed_spacing_deg=AR_seed_spacing_deg,trace_longARrooted_loops=bool(trace_longARrooted_loops),AR_r_seed=AR_r_seed,n_closed=n_closed,n_AR_open=None if n_AR_open in ('',None) or n_AR_open!=n_AR_open else int(n_AR_open),n_global_closed=n_global_closed,AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col,maps='both' if save_PFSS_maps is True else save_PFSS_maps,max_image_dt=float(disk_max_minutes or 60)*60,AR_loop_reach_deg=None if AR_loop_reach_deg=='' else float(AR_loop_reach_deg))
 		except Exception as exc:print('PFSS maps not saved:',exc)
 	plot_style=dict(
 		xlabel=xlabel,
@@ -382,7 +383,7 @@ if __name__=='__main__':
 		gong_cache=gong_cache, PFSS_dT=PFSS_dT, rss=rss, nrho=nrho,
 		r_seed=r_seed, n_lon=n_lon, n_lat=n_lat, focus_AR=focus_AR,
 		NOAA_number=NOAA_number, AR_time=AR_time, SRS_file=SRS_file, AR_lookup_max_age=AR_lookup_max_age,
-		AR_seed_spacing_deg=AR_seed_spacing_deg, trace_longARrooted_loops=trace_longARrooted_loops, n_AR_open=None if n_AR_open=='' else int(n_AR_open), AR_r_seed=AR_r_seed,
+		AR_seed_spacing_deg=AR_seed_spacing_deg, trace_longARrooted_loops=trace_longARrooted_loops, AR_loop_reach_deg=None if AR_loop_reach_deg=='' else float(AR_loop_reach_deg), n_AR_open=None if n_AR_open=='' else int(n_AR_open), AR_r_seed=AR_r_seed,
 		AR_closedB_col=AR_closedB_col, AR_openB_col=AR_openB_col, closed_field_color=closed_field_color, pfss_linewidth=pfss_linewidth, n_open=n_open,
 		n_global_closed=n_global_closed, n_closed=n_closed, ar_half_lon=ar_half_lon, ar_half_lat=ar_half_lat,
 		npix=npix, r_inner=r_inner, r_outer=r_outer,

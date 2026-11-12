@@ -144,6 +144,7 @@ These are the less obvious ones; the guide above each INPUT block documents ever
 | `diff_panel` | `'both'`, `'base'` or `'running'` (COR2 + HI1: one panel) |
 | `ar_half_lon`, `ar_half_lat`, `AR_seed_spacing_deg` | AR rectangle (degrees about the NOAA centre) and seed spacing for AR field lines. Same settings in the flow launchers and the LASCO/STEREO overlay makers, which share one traced-line cache per PFSS snapshot (`PFSS/<snapshot>/AR_field_lines_rooted.npz`). |
 | `trace_longARrooted_loops` | 1 keeps closed loops with one footpoint in the AR rectangle, so long AR loops are shown. 0 needs both footpoints inside. |
+| `AR_loop_reach_deg` | Closed AR loops are drawn only if both ends lie within this distance (degrees on the Sun) of the NOAA centre; default 50. Keeps AR–quiet-Sun and AR–AR connectors and drops longer PFSS loops (e.g. to the polar caps, where PFSS is least reliable). `''` = no limit. Selection only: cached traces are reused. |
 | `n_AR_open`, `n_closed`, `n_open` | Maximum magenta AR open lines, AR closed loops and global open lines drawn. Drawing only; cached lines are kept. |
 | `show_velocity_vectors` | 0 draws contours only, with the same layout. Vectors are still saved in the CSVs. |
 | `save_PFSS_maps` | PFSS maps at the sT–eT midpoint in `basedir` (`PFSS_*.png`), on the chosen disk image (nearest cached one first) or a blank Stonyhurst-grid disk with the AR rectangle (`solar_overlay.pfss_context_maps`). `True`/`'both'`, `'full'` (full Sun only), `'AR'` (AR only) or `False` (skip, e.g. on reruns). In all six frame makers. |
