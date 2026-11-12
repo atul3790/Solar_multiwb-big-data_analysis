@@ -348,8 +348,9 @@ def save_lightcurve_frames(frames,goes,flux_csv,sT,eT,outdir,
 						xerr=ul['time_error_seconds'].to_numpy()/86400 if 'time_error_seconds' in ul else None,uplims=True,
 						fmt='v',color='blue',ms=5,capsize=3,lw=1,label='LAT upper limit')
 				ax.set_yscale('log')
-				err=lambda side:lat.get(f'flux_error_{side}',lat.get('flux_error',0.))
-				lo,hi=(lat['flux']-err('lower')).where(lambda x:x>0,lat['flux']).min(),(lat['flux']+err('upper')).max()
+				w=lat[(lat['datetime']>=pd.Timestamp(sT,tz='UTC'))&(lat['datetime']<=pd.Timestamp(eT,tz='UTC'))]  # only points inside sT-eT set the axis
+				err=lambda side:w.get(f'flux_error_{side}',w.get('flux_error',0.))
+				lo,hi=(w['flux']-err('lower')).where(lambda x:x>0,w['flux']).min(),(w['flux']+err('upper')).max()
 				e10=lambda x:10**np.floor(np.log10(x))  # decade of x
 				if np.isfinite(lo) and np.isfinite(hi) and 0<lo<=hi:  # flux -+ error, rounded out to 1 or 5 x 10^n
 					m=hi/e10(hi);ax.set_ylim((5 if lo/e10(lo)>=5 else 1)*e10(lo),(1 if m<=1 else 5 if m<=5 else 10)*e10(hi))

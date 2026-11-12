@@ -487,6 +487,12 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 		lc.errorbar(mdates.date2num(b.datetime),b.flux,yerr=.25*b.flux,xerr=b.time_error_seconds/86400,uplims=True,fmt='o',ms=4,color='#9c260b')
 		lc.axvline(t.to_datetime(),color='black',ls=':',lw=1)
 		lc.set(xlim=[pd.Timestamp(sT),pd.Timestamp(eT)],yscale='log',ylabel='LAT >100 MeV flux\n(ph cm⁻² s⁻¹)',xlabel=f'Time +{sT} (UT)')
+		_w=lat[(lat['datetime']>=pd.Timestamp(sT,tz='UTC'))&(lat['datetime']<=pd.Timestamp(eT,tz='UTC'))]  # LAT axis from points inside sT-eT
+		lo,hi=(_w['flux']-_w['flux_error_lower']).where(lambda x:x>0,_w['flux']).min(),(_w['flux']+_w['flux_error_upper']).max()
+		e10=lambda x:10**np.floor(np.log10(x))  # decade of x
+		if np.isfinite(lo) and np.isfinite(hi) and 0<lo<=hi:  # flux -+ error, rounded out to 1 or 5 x 10^n
+			_m=hi/e10(hi);lc.set_ylim((5 if lo/e10(lo)>=5 else 1)*e10(lo),(1 if _m<=1 else 5 if _m<=5 else 10)*e10(hi))
+		else:lc.set_ylim(1e-8,1e-4)
 		rt.set(yscale='log',ylabel='GOES SXR flux\n(W m⁻²)')
 		lc.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
 		lc.grid(alpha=.2)
