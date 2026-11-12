@@ -66,6 +66,7 @@ pfss_dir='./PFSS'  # Reuse the same existing 3D PFSS database
 
 ### PFSS parameters ####
 PFSS_dT=6.                         # PFSS snapshot cadence, HOURS
+save_PFSS_maps=True     # True: save AR + full-Sun PFSS maps (on the disk image, or a blank Stonyhurst-grid disk) at the sT-eT midpoint in basedir as PFSS_*.png; False: skip (no redraw)
 rss= 2.5
 nrho=35
 r_seed=1.05
@@ -729,6 +730,10 @@ def save_lightcurve_frames(frames,goes,flux_csv,sT,eT,outdir,
 if __name__=='__main__':
 	_unset=[k for k in ('basedir','sT','eT','base_diff_DT') if k in globals() and ('YYYY' in str(globals()[k]) or str(globals()[k]).startswith('/path/to'))]
 	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
+	if save_PFSS_maps:  # AR + full-Sun PFSS maps at the sT-eT midpoint, saved in basedir
+		import solar_overlay as _so;from astropy.time import Time as _T
+		try:_so.pfss_context_maps((_T(sT)+(_T(eT)-_T(sT))/2).isot,'STEREO','EUVI',EUVI_wave,img_folder=img_folder,spacecraft=spacecraft,basedir=basedir,pfss_dir=pfss_dir,rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,PFSS_dT=PFSS_dT,SRS_folder=SRS_folder,NOAA_number=NOAA_number if focus_AR else None,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,AR_seed_spacing_deg=AR_seed_spacing_deg,trace_longARrooted_loops=bool(trace_longARrooted_loops),AR_r_seed=AR_r_seed,n_closed=n_closed,n_AR_open=None if n_AR_open in ('',None) or n_AR_open!=n_AR_open else int(n_AR_open),n_global_closed=n_global_closed,AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col)
+		except Exception as exc:print('PFSS maps not saved:',exc)
 	import os
 	cwd=os.getcwd()
 	os.chdir(basedir)  # all relative paths are inside the event folder

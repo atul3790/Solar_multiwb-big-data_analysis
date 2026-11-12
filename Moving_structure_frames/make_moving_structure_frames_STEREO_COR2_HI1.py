@@ -84,6 +84,7 @@ helioviewer=1
 dT=600
 EUVI_dT=7200
 PFSS_dT=6.
+save_PFSS_maps=True     # True: save AR + full-Sun PFSS maps (on the disk image, or a blank Stonyhurst-grid disk) at the sT-eT midpoint in basedir as PFSS_*.png; False: skip (no redraw)
 disk_max_minutes=120.
 base_diff_DT='YYYY-MM-DDThh:mm:ss'  # Quiet base-difference reference, UTC, at or before sT
 max_image_dt=600
@@ -227,6 +228,10 @@ output_tag=''  # Optional suffix for the output folder name
 if __name__=='__main__':
 	_unset=[k for k in ('basedir','sT','eT','base_diff_DT') if k in globals() and ('YYYY' in str(globals()[k]) or str(globals()[k]).startswith('/path/to'))]
 	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
+	if save_PFSS_maps:  # AR + full-Sun PFSS maps at the sT-eT midpoint, saved in basedir
+		import solar_overlay as _so;from astropy.time import Time as _T
+		try:_so.pfss_context_maps((_T(sT)+(_T(eT)-_T(sT))/2).isot,'STEREO','EUVI' if EUVI_fold else None,EUVI_wave,img_folder=STEREO_root,spacecraft={1:'A',2:'B'}.get(spacecraft_choice,'A'),basedir=basedir,pfss_dir=pfss_dir,rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,PFSS_dT=PFSS_dT or 6.,gong_cache=gong_cache,SRS_folder=SRS_file,closed_field_color=closed_field_color,NOAA_number=NOAA_number if focus_AR else None,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,AR_seed_spacing_deg=AR_seed_spacing_deg,trace_longARrooted_loops=bool(trace_longARrooted_loops),AR_r_seed=AR_r_seed,n_closed=n_closed,n_AR_open=None if n_AR_open in ('',None) or n_AR_open!=n_AR_open else int(n_AR_open),n_global_closed=n_global_closed,AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col)
+		except Exception as exc:print('PFSS maps not saved:',exc)
 	plot_style=dict(xlabel=xlabel,ylabel=ylabel,xticks=xticks,yticks=yticks,
 		xlabel_size=xlabel_size,ylabel_size=ylabel_size,xtick_size=xtick_size,ytick_size=ytick_size,
 		title=title,title_size=title_size,subtitle_size=subtitle_size,base_title=base_title,

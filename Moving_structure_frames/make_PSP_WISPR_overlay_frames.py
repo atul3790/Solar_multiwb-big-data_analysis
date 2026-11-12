@@ -56,6 +56,7 @@ need_pfss=True
 pfss_dir='./PFSS'                   # Shared PFSS snapshots (same UTC epochs as the LASCO/STEREO codes)
 ### PFSS parameters ####
 PFSS_dT=6.                          # PFSS snapshot cadence in HOURS
+save_PFSS_maps=True     # True: save AR + full-Sun PFSS maps (on the disk image, or a blank Stonyhurst-grid disk) at the sT-eT midpoint in basedir as PFSS_*.png; False: skip (no redraw)
 rss=2.5
 nrho=35
 r_seed=1.05
@@ -533,6 +534,10 @@ def make_PSP_WISPR_overlay_frames(sT,eT,dT,detector='INNER',img_folder='./PSP_WI
 if __name__=='__main__':
 	_unset=[k for k in ('basedir','sT','eT','base_diff_DT') if k in globals() and ('YYYY' in str(globals()[k]) or str(globals()[k]).startswith('/path/to'))]
 	if _unset:raise ValueError('Set these in the INPUT block first: '+', '.join(_unset))
+	if save_PFSS_maps:  # AR + full-Sun PFSS maps at the sT-eT midpoint, saved in basedir
+		import solar_overlay as _so;from astropy.time import Time as _T
+		try:_so.pfss_context_maps((_T(sT)+(_T(eT)-_T(sT))/2).isot,'SDO',None,None,basedir=basedir,pfss_dir=pfss_dir,rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,PFSS_dT=PFSS_dT)
+		except Exception as exc:print('PFSS maps not saved:',exc)
 	import os
 	cwd=os.getcwd()
 	os.chdir(basedir)  # all relative paths are inside the event folder
