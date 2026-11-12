@@ -105,6 +105,7 @@ def frame_map(ref,t,item):
 def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_region_span_rsun=None,
 	panel_keys=('base_difference','running_difference'),display_limit=None,
 	display_stretch='linear',display_soft=1.,display_smooth_px=0.,ar_seed_spacing_deg=None,ar_long_loops=True,show_vectors=True,n_AR_open=None,
+	detect_smooth_px=1.5,bright_contrast_snr=False,region_min_width_rsun=0.,region_max_aspect=None,
 	AR_halfwidth_arcsec=400., AR_seed_spacing_arcsec=40., AR_r_seed=1.01,
 	sT, eT, LASCO, SDO_fold, EUVI_fold, pfss_dir, outdir,
 	final_image_folder, SDO_instrument, SDO_product, EUVI_wave, focus_AR, NOAA_number, AR_time,
@@ -131,6 +132,13 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	n_closed); False needs both footpoints inside. All traced lines are cached
 	as AR_field_lines_rooted.npz (selection applied at drawing), reused only for
 	the same rectangle and spacing, so the toggle needs no retrace.
+
+	Detection (puddle_analysis.detect_signed): detect_smooth_px smooths before
+	thresholding. bright_contrast_snr=True makes bright_contrast a unitless local
+	SNR, (95th percentile of region - ring mean)/ring std, ring 2-6 x smoothing;
+	False keeps the old median difference in image units. region_min_width_rsun
+	and region_max_aspect set the minimum breadth and maximum length/breadth of a
+	region's fitted box (None: no limit); thin lines (HI1 artifacts) are dropped.
 	"""
 	rooted=ar_seed_spacing_deg is not None
 	if rooted:
@@ -324,7 +332,9 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 		for key in panel_keys:
 			labels,threshold=detect_signed(data[key],valid,detect_sigma,detect_min_area,detect_floor,bright_contrast,bright_min_area,
 				grid=(xr,yr),min_span=base_region_span_rsun if key=='base_difference' else region_span_rsun,
-				flow_support=support if key=='running_difference' else None,weak_factor=weak_bright_factor)
+				flow_support=support if key=='running_difference' else None,weak_factor=weak_bright_factor,
+				smooth_px=detect_smooth_px,snr=bool(bright_contrast_snr),min_width=region_min_width_rsun or 0.,
+				max_aspect=np.inf if region_max_aspect in (None,'') else float(region_max_aspect))
 			vectors=[];new_masks=[]
 			for kind,lab in zip(('bright','dark'),labels):
 				old=prior[key,kind] if prior is not None and prior_time==prev.isot and dt<=max_gap_seconds else None
@@ -507,7 +517,7 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	pd.DataFrame(disk_sources).to_csv(outdir_frames/'disk_sources.csv',index=False)
 	movie_name=f'{str(ref.detector).upper().replace("+","_")}_edge_velocity.mp4'
 	write_mp4(paths,outdir_frames/movie_name)
-	(outdir_frames/'parameters.json').write_text(json.dumps(dict(region_span_rsun=region_span_rsun,base_region_span_rsun=base_region_span_rsun,weak_bright_factor=weak_bright_factor,flow_support_radius_rsun=flow_support_radius_rsun,speed_cmap='rainbow_r',speed_bins_kms=speed_bins,colourbar_spacing='categorical equal-sized bands; numeric intervals explicitly labelled',edge_spacing_pixels=edge_spacing,support_radius_pixels=support_radius,min_support=min_support,min_displacement_pixels=min_displacement,arrow_length_pixels=arrow_length_pixels,centroid_arrow_length_pixels=centroid_arrow_length_pixels,length_encodes_speed=False,flow_source='previous trial intensity TV-L1, source vectors advected to target positions',n_open=n_open,n_global_closed=n_global_closed,n_closed=n_closed,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,ar_half_box_arcsec=ar_half_box_arcsec,spoke_pa=spoke_pa,spoke_halfwidth=spoke_halfwidth,spoke_arrow_buffer_deg=spoke_arrow_buffer_deg,bright_contrast=bright_contrast,bright_min_area=bright_min_area,arrow_min_area=arrow_min_area,mask_buffer_px=mask_buffer_px,detect_sigma=detect_sigma,detect_floor=detect_floor,detect_min_area=detect_min_area,max_gap_seconds=max_gap_seconds,disk_folder=str(folder) if folder is not None else None,NOAA_number=NOAA_number if focus_AR else None,pfss_file=str(pfss_file),disk_max_minutes=None if np.isinf(disk_max_minutes) else disk_max_minutes,bright_border=bright_border,dark_border=dark_border,border_width=border_width,physical_velocity_validated=False),indent=2))
+	(outdir_frames/'parameters.json').write_text(json.dumps(dict(region_span_rsun=region_span_rsun,base_region_span_rsun=base_region_span_rsun,weak_bright_factor=weak_bright_factor,flow_support_radius_rsun=flow_support_radius_rsun,speed_cmap='rainbow_r',speed_bins_kms=speed_bins,colourbar_spacing='categorical equal-sized bands; numeric intervals explicitly labelled',edge_spacing_pixels=edge_spacing,support_radius_pixels=support_radius,min_support=min_support,min_displacement_pixels=min_displacement,arrow_length_pixels=arrow_length_pixels,centroid_arrow_length_pixels=centroid_arrow_length_pixels,length_encodes_speed=False,flow_source='previous trial intensity TV-L1, source vectors advected to target positions',n_open=n_open,n_global_closed=n_global_closed,n_closed=n_closed,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,ar_half_box_arcsec=ar_half_box_arcsec,spoke_pa=spoke_pa,spoke_halfwidth=spoke_halfwidth,spoke_arrow_buffer_deg=spoke_arrow_buffer_deg,bright_contrast=bright_contrast,bright_contrast_snr=bool(bright_contrast_snr),detect_smooth_px=detect_smooth_px,region_min_width_rsun=region_min_width_rsun,region_max_aspect=region_max_aspect,bright_min_area=bright_min_area,arrow_min_area=arrow_min_area,mask_buffer_px=mask_buffer_px,detect_sigma=detect_sigma,detect_floor=detect_floor,detect_min_area=detect_min_area,max_gap_seconds=max_gap_seconds,disk_folder=str(folder) if folder is not None else None,NOAA_number=NOAA_number if focus_AR else None,pfss_file=str(pfss_file),disk_max_minutes=None if np.isinf(disk_max_minutes) else disk_max_minutes,bright_border=bright_border,dark_border=dark_border,border_width=border_width,physical_velocity_validated=False),indent=2))
 
 if __name__=='__main__':
 	raise SystemExit('Run the LASCO or STEREO frame maker instead.')

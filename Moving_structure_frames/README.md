@@ -138,6 +138,8 @@ These are the less obvious ones; the guide above each INPUT block documents ever
 | `reuse_cache` | `''` builds a new motion cache. `'latest'` or a cache path redraws only. |
 | `noise_model`, `ring_strength`, `ring_step_rsun` | Differences in sigma units (`'ring'`, `'global'`) or input units (`'none'`, LASCO/STEREO only). With `'ring'`, faint outer structures are detected as readily as bright inner ones. |
 | `detect_sigma`, `detect_floor`, `bright_contrast` | Detection threshold, in sigma when a noise model is used |
+| `detect_smooth_px`, `bright_contrast_snr` | Smoothing (grid pixels) before thresholding. With `bright_contrast_snr=1`, `bright_contrast` is a unitless local SNR: (region 95th percentile − ring mean) / ring std. COR2 + HI1 uses 4 px and SNR ≥ 2, which brings out faint diffuse structures. |
+| `region_min_width_rsun`, `region_max_aspect` | Minimum breadth and maximum length/breadth of each region's fitted box. Drops thin lines such as HI1 artifacts (COR2 + HI1: 0.8 Rsun, 6). `''` = no limit. |
 | `display_stretch`, `display_limit`, `display_smooth_px` | Display only (asinh stretch, grey-scale limit in sigma, smoothing). Detection is unaffected. |
 | `diff_panel` | `'both'`, `'base'` or `'running'` (COR2 + HI1: one panel) |
 | `ar_half_lon`, `ar_half_lat`, `AR_seed_spacing_deg` | AR rectangle (degrees about the NOAA centre) and seed spacing for AR field lines. Same settings in the flow launchers and the LASCO/STEREO overlay makers, which share one traced-line cache per PFSS snapshot (`PFSS/<snapshot>/AR_field_lines_rooted.npz`). |

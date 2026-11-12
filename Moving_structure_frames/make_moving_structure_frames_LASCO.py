@@ -275,6 +275,10 @@ detect_min_area=18
 region_span_rsun=2.6
 base_region_span_rsun=2. # Minimum projected span (Rsun) for base difference.
 bright_contrast=1.      # original: 8 (input image units)
+detect_smooth_px=1.5    # Gaussian smoothing (grid px) before thresholding; 4 tested on COR2+HI1 for faint diffuse structures
+bright_contrast_snr=0   # 1: bright_contrast is a unitless local SNR (region 95th pct - ring mean)/ring std (~2 faint, ~3 clear)
+region_min_width_rsun='' # Min breadth (minor axis of the region's fitted box), Rsun; '' = no limit (COR2+HI1: 0.8)
+region_max_aspect=''    # Max length/breadth of the box; drops thin lines; '' = no limit (COR2+HI1: 6)
 bright_min_area=35
 weak_bright_factor=.45
 flow_support_radius_rsun=1.5
@@ -388,7 +392,7 @@ if __name__=='__main__':
 		npix=npix, r_inner=r_inner, r_outer=r_outer,
 		spoke_pa=spoke_pa, spoke_halfwidth=spoke_halfwidth, spoke_arrow_buffer_deg=spoke_arrow_buffer_deg, mask_buffer_px=mask_buffer_px,
 		detect_sigma=detect_sigma, detect_floor=detect_floor, detect_min_area=detect_min_area, region_span_rsun=region_span_rsun, base_region_span_rsun=base_region_span_rsun,
-		weak_bright_factor=weak_bright_factor, flow_support_radius_rsun=flow_support_radius_rsun, bright_contrast=bright_contrast, bright_min_area=bright_min_area,
+		weak_bright_factor=weak_bright_factor, flow_support_radius_rsun=flow_support_radius_rsun, bright_contrast=bright_contrast,detect_smooth_px=detect_smooth_px,bright_contrast_snr=bool(bright_contrast_snr),region_min_width_rsun=float(region_min_width_rsun or 0.),region_max_aspect=None if region_max_aspect=='' else float(region_max_aspect), bright_min_area=bright_min_area,
 		arrow_min_area=arrow_min_area, edge_spacing=edge_spacing, support_radius=support_radius, min_support=min_support,
 		min_displacement=min_displacement, user_datacsv=user_datacsv, goes_folder=goes_folder, goes_download=goes_download,
 		goes_pickle=goes_pickle, goes_csv=goes_csv, bright_border=bright_border, dark_border=dark_border,

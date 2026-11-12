@@ -150,11 +150,15 @@ mask_buffer_px=5
 
 #### Feature detection (sigma units) ####
 detect_sigma=2.         # was 2.5; tuned with ring_strength=0.7
-detect_floor=1.         # was 1.5
+detect_floor=.4         # was 1; detect_smooth_px=4 lowers the noise level, so the floor must drop
 detect_min_area=18
 region_span_rsun=2.6
 base_region_span_rsun=2. # Minimum projected span (Rsun) for base difference.
-bright_contrast=1.      # was 1.5
+detect_smooth_px=4.     # Gaussian smoothing (grid px) before thresholding; 1.5 = old value; 4 brings out faint diffuse structures
+bright_contrast=2.      # bright_contrast_snr=1: unitless local SNR (region 95th pct - ring mean)/ring std; ~2 faint, ~3 clear
+bright_contrast_snr=1   # 1: bright_contrast is the local SNR above; 0: old median difference (noise units)
+region_min_width_rsun=.8 # Min breadth (minor axis of the region's fitted box), Rsun; '' = no limit
+region_max_aspect=6.    # Max length/breadth of the box; drops thin lines such as HI1 artifacts; '' = no limit
 bright_min_area=35
 weak_bright_factor=.45
 flow_support_radius_rsun=1.5
@@ -257,7 +261,7 @@ if __name__=='__main__':
 		detect_sigma=detect_sigma,detect_floor=detect_floor,detect_min_area=detect_min_area,
 		region_span_rsun=region_span_rsun,base_region_span_rsun=base_region_span_rsun,
 		weak_bright_factor=weak_bright_factor,flow_support_radius_rsun=flow_support_radius_rsun,
-		bright_contrast=bright_contrast,bright_min_area=bright_min_area,arrow_min_area=arrow_min_area,
+		bright_contrast=bright_contrast,detect_smooth_px=detect_smooth_px,bright_contrast_snr=bool(bright_contrast_snr),region_min_width_rsun=float(region_min_width_rsun or 0.),region_max_aspect=None if region_max_aspect=='' else float(region_max_aspect),bright_min_area=bright_min_area,arrow_min_area=arrow_min_area,
 		edge_spacing=edge_spacing,support_radius=support_radius,min_support=min_support,
 		min_displacement=min_displacement,bright_border=bright_border,dark_border=dark_border,
 		new_border=new_border,border_width=border_width,arrow_length_pixels=arrow_length_pixels,

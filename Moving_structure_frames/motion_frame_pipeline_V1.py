@@ -50,7 +50,8 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	LASCO=None, LASCO_imgfolder=None, need_LASCO_calib=None, SDO_fold=None,
 	SDO_instrument=None, SDO_product=None, SDO_dT=None, spacecraft=None,
 	instrument=None, STEREO_imgfolder=None, polar=None, EUVI_fold=None,
-	EUVI_wave=None, EUVI_dT=None):
+	EUVI_wave=None, EUVI_dT=None, detect_smooth_px=1.5, bright_contrast_snr=False,
+	region_min_width_rsun=0., region_max_aspect=None):
 	"""Prepare and render one event using settings from its launcher (V1 options in the module docstring)."""
 	root=Path(input_folder).expanduser().resolve()
 	def source(path):
@@ -191,6 +192,10 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 		weak_bright_factor=weak_bright_factor,
 		flow_support_radius_rsun=flow_support_radius_rsun,
 		bright_contrast=bright_contrast,
+		bright_contrast_snr=bright_contrast_snr,
+		detect_smooth_px=detect_smooth_px,
+		region_min_width_rsun=region_min_width_rsun,
+		region_max_aspect=region_max_aspect,
 		bright_min_area=bright_min_area,
 		arrow_min_area=arrow_min_area,
 		detect_floor=detect_floor,
