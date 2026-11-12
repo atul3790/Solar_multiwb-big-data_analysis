@@ -146,7 +146,7 @@ These are the less obvious ones; the guide above each INPUT block documents ever
 | `trace_longARrooted_loops` | 1 keeps closed loops with one footpoint in the AR rectangle, so long AR loops are shown. 0 needs both footpoints inside. |
 | `n_AR_open`, `n_closed`, `n_open` | Maximum magenta AR open lines, AR closed loops and global open lines drawn. Drawing only; cached lines are kept. |
 | `show_velocity_vectors` | 0 draws contours only, with the same layout. Vectors are still saved in the CSVs. |
-| `save_PFSS_maps` | True saves a full-Sun and an AR PFSS map at the sT–eT midpoint in `basedir` (`PFSS_*.png`), on the chosen disk image or a blank Stonyhurst-grid disk (`solar_overlay.pfss_context_maps`). False skips them, e.g. on reruns. In all six frame makers. |
+| `save_PFSS_maps` | PFSS maps at the sT–eT midpoint in `basedir` (`PFSS_*.png`), on the chosen disk image (nearest cached one first) or a blank Stonyhurst-grid disk with the AR rectangle (`solar_overlay.pfss_context_maps`). `True`/`'both'`, `'full'` (full Sun only), `'AR'` (AR only) or `False` (skip, e.g. on reruns). In all six frame makers. |
 | `speed_bins` | Colour bands for projected speed (km/s) |
 | `hi_flow_clean` | COR2 + HI1: compute HI1 flow on F-corona- and star-removed images. Without it the star field drifting with the spacecraft pulls arrows sunward. |
 
