@@ -1,0 +1,19 @@
+# Moving_structure_frames dependencies (names, not a tested version lock).
+# Also requires the Solar_data_mining modules on PYTHONPATH:
+#   https://github.com/atul3790/Solar_data_mining
+numpy
+scipy
+scikit-image
+pandas
+matplotlib
+Pillow
+astropy
+sunpy[map,net,timeseries]
+pfsspy
+contourpy
+multiprocess
+# Used through Solar_data_mining (Helioviewer back-ups, reprojection):
+reproject
+hvpy
+glymur
+# MP4 writing uses the ffmpeg executable (install separately, e.g. conda or Homebrew).
