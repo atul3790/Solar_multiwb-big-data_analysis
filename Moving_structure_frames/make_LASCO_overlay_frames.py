@@ -82,6 +82,7 @@ AR_r_seed=1.01                      # Radius in solar radii, for low closed loop
 AR_closedB_col='lime'               # Closed AR-seeded lines (focus_AR=True)
 AR_openB_col='magenta'              # Open AR-seeded lines, both polarities
 closed_field_color='white'         # Matplotlib colour for closed PFSS lines
+n_open=30                # Max global open PFSS traces drawn, evenly spread (as in the flow frames); '' draws all
 n_global_closed=20       # Global closed PFSS loops drawn
 n_closed=30              # Max AR closed loops drawn (tallest first with trace_longARrooted_loops=1); np.nan: all
 n_AR_open=5              # Max open AR field lines drawn (magenta), spread evenly; np.nan: all
@@ -89,6 +90,16 @@ max_image_dt=600                     # Maximum image offset from target, seconds
 reference_lookback=3600              # Pre-sT predecessor search window, seconds
 npix=1024
 dpi=90
+#### Plot labels and sizes (points), as in the moving-structure frames ####
+pfss_linewidth=1.5 # Width in points for all PFSS lines.
+xlabel=r'Solar X ($R_\odot$)'
+ylabel=r'Solar Y ($R_\odot$)'
+xticks=None # Solar radii; None keeps instrument defaults.
+yticks=None # Solar radii; None keeps instrument defaults.
+xlabel_size=18
+ylabel_size=18
+xtick_size=15
+ytick_size=15
 ########################################################################
 #----------------------------------------------------------------------#
 
@@ -401,6 +412,47 @@ def _init_frame_worker(settings):
 	globals()['_pfss_cache']={}
 	plt.switch_backend('Agg')
 
+def _thin_open(lines,n_open):
+	"""Keep n_open global open traces, evenly spread (as in the flow frames); None keeps all."""
+	op=np.unique(lines['seg'][lines['pol']!=0])
+	if n_open is None or len(op)<=n_open:return lines
+	keep=(lines['pol']==0)|np.isin(lines['seg'],op[np.linspace(0,len(op),int(n_open),endpoint=False,dtype=int)])
+	return {k:(v[keep] if isinstance(v,np.ndarray) and v.shape==keep.shape else v) for k,v in lines.items()}
+
+def _nice_edge(v,reach=3.):
+	"""Extend |v| (Rsun) to the next multiple of 10, else of 5, if it lies within reach; else keep v."""
+	a=abs(v)
+	for m in (10,5):
+		e=np.ceil(a/m-1e-9)*m
+		if e-a<=reach:return np.copysign(e,v)
+	return v
+
+def _rsun_axes(ax,tmap,style):
+	"""Pixel axes ticked in solar radii, as in the moving-structure frames.
+
+	Limits are symmetric: the smaller half-width, extended to a round radius (multiple of 10, else 5, within 3 Rsun);
+	minor ticks mark the multiples of 5 Rsun between major ticks.
+	"""
+	c=sunpy.map.all_coordinates_from_map(tmap);rs=tmap.rsun_obs.to_value(u.arcsec)
+	xr,yr=c.Tx.to_value(u.arcsec)/rs,c.Ty.to_value(u.arcsec)/rs
+	ny,nx=xr.shape
+	for axis,coords in (('x',xr[ny//2]),('y',yr[:,nx//2])):
+		pix=np.poly1d(np.polyfit(coords,np.arange(coords.size),1))  # Rsun -> pixel (linear grid)
+		hi=_nice_edge(min(-coords.min(),coords.max()));lo=-hi  # symmetric about Sun centre
+		vals=style.get(axis+'ticks')
+		if vals is None:
+			step=10
+			vals=np.arange(np.ceil(lo/step-1e-9),np.floor(hi/step+1e-9)+1)*step
+		vals=[v for v in vals if lo-1e-9<=v<=hi+1e-9]
+		minor=[v for v in np.arange(np.ceil(lo/5-1e-9),np.floor(hi/5+1e-9)+1)*5 if not np.isclose(vals,v).any()]
+		getattr(ax,f'set_{axis}ticks')(pix(vals),labels=[f'{v:g}' for v in vals])
+		getattr(ax,f'set_{axis}ticks')(pix(minor),minor=True)
+		getattr(ax,f'set_{axis}lim')(*sorted(pix([lo,hi])))
+	ax.tick_params(axis='x',labelsize=style.get('xtick_size',15));ax.tick_params(axis='y',labelsize=style.get('ytick_size',15))
+	ax.tick_params(which='minor',length=3)
+	ax.set_xlabel(style.get('xlabel',r'Solar X ($R_\odot$)'),fontsize=style.get('xlabel_size',18))
+	ax.set_ylabel(style.get('ylabel',r'Solar Y ($R_\odot$)'),fontsize=style.get('ylabel_size',18))
+
 def _render_overlay_frame(job,settings):
 	"""Render one frame using its predetermined running-difference reference."""
 	row,predecessor,h=job
@@ -485,15 +537,20 @@ def _render_overlay_frame(job,settings):
 		brgb=plt.get_cmap(cmap)(np.nan_to_num(scaled_b))[...,:3]
 		image=oh._composite([(rgb,np.ones_like(d),good),(brgb,weight,bvalid)],0.9)
 	fig=Figure(figsize=(8,8),dpi=dpi)
-	ax=fig.add_subplot(projection=tmap)
+	style=settings.get('plot_style',{})
+	lw=style.get('pfss_linewidth',1.5)
+	ax=fig.add_subplot()
+	ax.set_facecolor('black')  # area beyond the image when limits are extended
 	ax.imshow(image,origin='lower')
-	oh._draw_pfss(ax,tmap,global_lines,N_Bloop=N_global_closed,colors=field_colors)
+	oh._draw_pfss(ax,tmap,_thin_open(global_lines,style.get('n_open',30)),lw=lw,alpha=.65,N_Bloop=N_global_closed,colors=field_colors)
 	if ar_lines is not None:
 		ar_colors={0:settings['AR_closedB_col'],1:settings['AR_openB_col'],-1:settings['AR_openB_col']}
-		oh._draw_pfss(ax,tmap,ar_lines,N_Bloop=np.nan,colors=ar_colors)  # already selected and capped
+		oh._draw_pfss(ax,tmap,ar_lines,lw=lw,alpha=.85,N_Bloop=np.nan,colors=ar_colors)  # already selected and capped
 	ax.text(.02,.98,t.strftime('%Y-%m-%d %H:%M:%S UT'),transform=ax.transAxes,
 		va='top',color='white',bbox=dict(facecolor='black',alpha=.6))
 	ax.set_title(f'LASCO {LASCO} '+(diff_type.replace('_',' ') if refpath else 'intensity')+f' + {SDO_label} + PFSS')
+	_rsun_axes(ax,tmap,style)
+	fig.tight_layout()
 	png=root/'overlay_images'/f'overlay_{t.strftime("%Y%m%d_%H%M%S")}.png'
 	fig.savefig(png,dpi=dpi)
 	fig.clear()
@@ -743,8 +800,9 @@ if __name__=='__main__':
 					reference=None
 				jobs.append((row,reference,min(sdo,key=lambda r:abs((r[0]-row[0]).to_value(u.s))) if sdo else None))
 				predecessor=row
+			plot_style=dict(n_open=None if n_open=='' else n_open,pfss_linewidth=pfss_linewidth,xlabel=xlabel,ylabel=ylabel,xticks=xticks,yticks=yticks,xlabel_size=xlabel_size,ylabel_size=ylabel_size,xtick_size=xtick_size,ytick_size=ytick_size)
 			settings={key:globals()[key] for key in ('root','LASCO','SDO_label','SDO_instrument',
-				'SDO_product','npix','dpi','pfss_models','focus_AR','n_global_closed','AR_selected','diff_type','closed_field_color','AR_closedB_col','AR_openB_col')}
+				'SDO_product','npix','dpi','pfss_models','focus_AR','n_global_closed','AR_selected','diff_type','closed_field_color','AR_closedB_col','AR_openB_col','plot_style')}
 			jobs=[(job,settings) for job in jobs]
 			if nproc==1:
 				_init_frame_worker({})

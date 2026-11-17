@@ -100,8 +100,19 @@ observer_distance_au=None          # AU; None retains header/Horizons value
 nproc=2                           # Rendering workers; avoid high memory use
 npix=1024
 dpi=90
+n_open=30                # Max global open PFSS traces drawn, evenly spread (as in the flow frames); '' draws all
 n_global_closed=20       # Global closed PFSS loops drawn
 closed_color='white'
+#### Plot labels and sizes (points), as in the moving-structure frames ####
+pfss_linewidth=1.5 # Width in points for all PFSS lines.
+xlabel=r'Solar X ($R_\odot$)'
+ylabel=r'Solar Y ($R_\odot$)'
+xticks=None # Solar radii; None keeps instrument defaults.
+yticks=None # Solar radii; None keeps instrument defaults.
+xlabel_size=18
+ylabel_size=18
+xtick_size=15
+ytick_size=15
 ###########################################################################
 
 flux_csv=Path(user_datacsv) if user_datacsv else None  # inside basedir
@@ -253,6 +264,47 @@ def find_NOAA_location(number,requested,cache_dir,local_file=None,max_age=36):
 	return best['lon'],best['lat'],best['epoch'],best
 
 
+def _thin_open(lines,n_open):
+	"""Keep n_open global open traces, evenly spread (as in the flow frames); None keeps all."""
+	op=np.unique(lines['seg'][lines['pol']!=0])
+	if n_open is None or len(op)<=n_open:return lines
+	keep=(lines['pol']==0)|np.isin(lines['seg'],op[np.linspace(0,len(op),int(n_open),endpoint=False,dtype=int)])
+	return {k:(v[keep] if isinstance(v,np.ndarray) and v.shape==keep.shape else v) for k,v in lines.items()}
+
+def _nice_edge(v,reach=3.):
+	"""Extend |v| (Rsun) to the next multiple of 10, else of 5, if it lies within reach; else keep v."""
+	a=abs(v)
+	for m in (10,5):
+		e=np.ceil(a/m-1e-9)*m
+		if e-a<=reach:return np.copysign(e,v)
+	return v
+
+def _rsun_axes(ax,tmap,style):
+	"""Pixel axes ticked in solar radii, as in the moving-structure frames.
+
+	Limits are symmetric: the smaller half-width, extended to a round radius (multiple of 10, else 5, within 3 Rsun);
+	minor ticks mark the multiples of 5 Rsun between major ticks.
+	"""
+	c=sunpy.map.all_coordinates_from_map(tmap);rs=tmap.rsun_obs.to_value(u.arcsec)
+	xr,yr=c.Tx.to_value(u.arcsec)/rs,c.Ty.to_value(u.arcsec)/rs
+	ny,nx=xr.shape
+	for axis,coords in (('x',xr[ny//2]),('y',yr[:,nx//2])):
+		pix=np.poly1d(np.polyfit(coords,np.arange(coords.size),1))  # Rsun -> pixel (linear grid)
+		hi=_nice_edge(min(-coords.min(),coords.max()));lo=-hi  # symmetric about Sun centre
+		vals=style.get(axis+'ticks')
+		if vals is None:
+			step=5 if hi-lo<50 else 10
+			vals=np.arange(np.ceil(lo/step-1e-9),np.floor(hi/step+1e-9)+1)*step
+		vals=[v for v in vals if lo-1e-9<=v<=hi+1e-9]
+		minor=[v for v in np.arange(np.ceil(lo/5-1e-9),np.floor(hi/5+1e-9)+1)*5 if not np.isclose(vals,v).any()]
+		getattr(ax,f'set_{axis}ticks')(pix(vals),labels=[f'{v:g}' for v in vals])
+		getattr(ax,f'set_{axis}ticks')(pix(minor),minor=True)
+		getattr(ax,f'set_{axis}lim')(*sorted(pix([lo,hi])))
+	ax.tick_params(axis='x',labelsize=style.get('xtick_size',15));ax.tick_params(axis='y',labelsize=style.get('ytick_size',15))
+	ax.tick_params(which='minor',length=3)
+	ax.set_xlabel(style.get('xlabel',r'Solar X ($R_\odot$)'),fontsize=style.get('xlabel_size',18))
+	ax.set_ylabel(style.get('ylabel',r'Solar Y ($R_\odot$)'),fontsize=style.get('ylabel_size',18))
+
 def _draw_stereo_pfss(ax,tmap,observer,model,cfg):
 	"""Project the saved 3-D Carrington field into this STEREO exposure."""
 	obs=tmap.observer_coordinate.transform_to(frames.HeliographicStonyhurst(obstime=tmap.date))
@@ -264,10 +316,10 @@ def _draw_stereo_pfss(ax,tmap,observer,model,cfg):
 	# The helper transforms Carrington points into the target HPC WCS, including
 	# the observer's longitude, latitude and distance. No longitude offset or
 	# image-plane rotation is applied to the saved field.
-	oh._draw_pfss(ax,tmap,_field_lines(model),N_Bloop=cfg['n_global_closed'],
+	oh._draw_pfss(ax,tmap,_thin_open(_field_lines(model),cfg['plot_style'].get('n_open',30)),lw=cfg['plot_style'].get('pfss_linewidth',1.5),alpha=.65,N_Bloop=cfg['n_global_closed'],
 		colors={0:cfg['closed_color'],1:cfg['open_positive_color'],-1:cfg['open_negative_color']})
 	if cfg.get('ar_model') is not None:
-		oh._draw_pfss(ax,tmap,_ar_field_lines(cfg['ar_model']),N_Bloop=np.nan,  # already selected and capped
+		oh._draw_pfss(ax,tmap,_ar_field_lines(cfg['ar_model']),lw=cfg['plot_style'].get('pfss_linewidth',1.5),alpha=.85,N_Bloop=np.nan,  # already selected and capped
 			colors={0:cfg['AR_closedB_col'],1:cfg['AR_openB_col'],-1:cfg['AR_openB_col']})
 
 
@@ -319,7 +371,7 @@ def _stereo_frame(task):
 			lo,hi=np.percentile(valid,[1,99.5])
 			if hi<=lo:hi=lo+1
 		fig=Figure(figsize=(8,8),dpi=cfg['dpi'])
-		ax=fig.add_subplot(projection=tmap)
+		ax=fig.add_subplot()
 		ax.set_facecolor('black')
 		ax.imshow(data,origin='lower',cmap='gray',vmin=lo,vmax=hi)
 		euvi_note=''
@@ -347,8 +399,7 @@ def _stereo_frame(task):
 				with (Path(cfg['outdir'])/'EUVI_overlay_errors.txt').open('a') as stream:
 					stream.write(f'{t.isot}: {exc}\n')
 		if model is not None:_draw_stereo_pfss(ax,tmap,observer,model,cfg)
-		ax.set_xlabel('Solar X (arcsec)',fontsize=16)
-		ax.set_ylabel('Solar Y (arcsec)',fontsize=16)
+		_rsun_axes(ax,tmap,cfg['plot_style'])
 		mode=cfg['diff_type'].replace('_',' ') if reference is not None else 'intensity'
 		ax.set_title(f'STEREO-{cfg["spacecraft"]} {cfg["instrument"]}: {mode}'+euvi_note,fontsize=17)
 		ax.text(.02,.98,t.strftime('%Y-%m-%d %H:%M:%S UT'),transform=ax.transAxes,
@@ -379,7 +430,7 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 	focus_AR=False,AR_lon=None,AR_lat=None,AR_time=None,ar_half_lon=12.,
 	ar_half_lat=12.,AR_seed_spacing_deg=1.,trace_longARrooted_loops=1,AR_r_seed=1.01,AR_loop_reach_deg=None,
 	n_closed=30,n_AR_open=5,AR_closedB_col='lime',AR_openB_col='magenta',goes_pickle=None,goes_folder=None,SRS_folder=None,
-		NOAA_number=None,SRS_file=None,AR_lookup_max_age=36):
+		NOAA_number=None,SRS_file=None,AR_lookup_max_age=36,plot_style=None):
 	'''COR1/COR2 intensity/difference frames with PFSS in the spacecraft viewpoint.
 
 	PFSS_dT is hours. dT/reference_search are seconds. location=None uses headers,
@@ -504,7 +555,7 @@ def make_STEREO_frames(sT,eT,dT,spacecraft='A',instrument='COR2',img_folder='./S
 		npix=npix,dpi=dpi,n_global_closed=n_global_closed,closed_color=closed_color,
 		open_positive_color=open_positive_color,open_negative_color=open_negative_color,
 		r_inner=1.4 if instrument=='COR1' else 2.5,r_outer=4. if instrument=='COR1' else 15.,
-		AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col)
+		AR_closedB_col=AR_closedB_col,AR_openB_col=AR_openB_col,plot_style=plot_style or {})
 	euvi_rows=[];euvi_log=[]
 	if EUVI_needed:
 		euvi_rows=stereo_cache(img_folder,spacecraft,'EUVI',wave=EUVI_wave)
@@ -751,6 +802,7 @@ if __name__=='__main__':
 		import importlib
 		sys.path.insert(0,str(Path(__file__).resolve().parent))
 		module=importlib.import_module(Path(__file__).stem)
+		plot_style=dict(n_open=None if n_open=='' else n_open,pfss_linewidth=pfss_linewidth,xlabel=xlabel,ylabel=ylabel,xticks=xticks,yticks=yticks,xlabel_size=xlabel_size,ylabel_size=ylabel_size,xtick_size=xtick_size,ytick_size=ytick_size)
 		settings={key:globals()[key] for key in (
 			'sT','eT','dT','spacecraft','instrument','polar','img_folder','outdir',
 			'final_image_folder','diff_type','first_frame_intensity','base_diff_DT',
@@ -759,7 +811,7 @@ if __name__=='__main__':
 			'nproc','npix','dpi','n_global_closed','closed_color','open_positive_color',
 			'open_negative_color','need_GOES','flux_csv','goes_pickle','goes_folder','EUVI_needed','EUVI_wave','EUVI_dT','EUVI_radius','EUVI_BW',
 			'focus_AR','NOAA_number','SRS_file','SRS_folder','AR_lookup_max_age','AR_lon','AR_lat','AR_time','ar_half_lon','ar_half_lat',
-			'AR_seed_spacing_deg','trace_longARrooted_loops','AR_loop_reach_deg','AR_r_seed','n_closed','n_AR_open','AR_closedB_col','AR_openB_col')}
+			'AR_seed_spacing_deg','trace_longARrooted_loops','AR_loop_reach_deg','AR_r_seed','n_closed','n_AR_open','AR_closedB_col','AR_openB_col','plot_style')}
 
 		paths=module.make_STEREO_frames(**settings)
 		print('Saved',len(paths),'STEREO PNG frames')
