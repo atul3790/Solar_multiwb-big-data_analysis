@@ -18,6 +18,15 @@ hi1_max_image_dt, so one HI1 pair can repeat over several COR2 slots.
 Output files match motion_inputs.make_motion_cache (reference_grid.fits,
 coordinates.npz, structures_*.npz, times.json) plus zone masks, so
 track_coronagraph_flows.render_frames draws them unchanged.
+
+flow_input selects the TV-L1 input: 'intensity' (default, identical to
+earlier versions) or 'base_difference'
+(COR2: frame - COR2 base; HI1: cleaned(sum) - cleaned(base sum)). Recorded as
+flow_input in combined_scales.json. recompute_flow rewrites the flow of an
+existing cache for either input.
+
+Importable: make_combined_cache, hi_clean_flow, recompute_flow, apply_noise_model,
+ring_noise_profile, zone_flow, star_drift, hi_inventory, combined_grid, sample.
 """
 from pathlib import Path
 import json
@@ -31,7 +40,8 @@ import sunpy.map
 from scipy import ndimage as ndi
 from sunpy.coordinates import frames
 from datamine_calib_helper import load_map,_hi_level
-from motion_inputs import flow,select_family,spacecraft_id
+from motion_inputs import flow,select_family,spacecraft_id,check_flow_input,flow_pair,find_predecessor
+import motion_inputs
 from puddle_analysis import usable_grid
 
 FITS_SUFFIX=('.fits','.fit','.fts','.fits.gz','.fit.gz','.fts.gz')
@@ -118,8 +128,11 @@ def robust_sigma(values):
 def make_combined_cache(cor2_folder,hi_folder,spacecraft,start,end,cadence,base_time,reference_lookback,
 	max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True,hi_detector='HI1',
 	hi_max_image_dt=1500.,hi_lookback=3600.,hi_max_gap=5400.,hi_star_filter_px=5,hi_edge_px=8,
-	seam_rsun=None,spoke_pa=0.,spoke_halfwidth=0.,spoke_arrow_buffer_deg=0.,noise_model='ring',ring_step_rsun=3.,ring_strength=.7,hi_flow_clean=True):
+	seam_rsun=None,spoke_pa=0.,spoke_halfwidth=0.,spoke_arrow_buffer_deg=0.,noise_model='ring',ring_step_rsun=3.,ring_strength=.7,hi_flow_clean=True,flow_input='intensity'):
 	"""Build the COR2+HI1 cache in out; return out.
+
+	flow_input: 'intensity' (default) or 'base_difference' (TV-L1 on frame - base
+	in each zone; HI1 pixels lose quality when there is no HI1 base sum).
 
 	noise_model: 'ring' (default) then divides each zone by its noise-versus-
 	radius profile (see apply_noise_model); 'global' keeps one scale per instrument.
@@ -132,6 +145,7 @@ def make_combined_cache(cor2_folder,hi_folder,spacecraft,start,end,cadence,base_
 	hi_star_filter_px: median filter (native HI pixels) that removes stars; 0 off.
 	hi_edge_px: grid pixels trimmed from the HI field edge.
 	"""
+	check_flow_input(flow_input)
 	out=Path(out);out.mkdir(parents=True,exist_ok=True)
 	start,end,base_time=map(Time,(start,end,base_time))
 	seam=r_outer if seam_rsun is None else seam_rsun
@@ -197,7 +211,7 @@ def make_combined_cache(cor2_folder,hi_folder,spacecraft,start,end,cadence,base_
 		dt=(t-prev[0]).sec
 		cv=cor2_zone&np.isfinite(im)&np.isfinite(a)&np.isfinite(b)
 		run=np.where(cv,im-a,0.).astype('float32');bas=np.where(cv,im-b,0.).astype('float32')
-		if dt<=max_gap:dx,dy,q=zone_flow(np.nan_to_num(a),np.nan_to_num(im),cv)
+		if dt<=max_gap:dx,dy,q=zone_flow(*flow_pair(np.nan_to_num(a),np.nan_to_num(im),np.nan_to_num(b),flow_input),cv)
 		else:dx,dy,q=(np.zeros(cv.shape,'float32'),np.zeros(cv.shape,'float32'),np.zeros(cv.shape,bool))
 		arrow=cor2_arrow&cv
 		hrow=nearest_hi(t);hprev=hi_predecessor(hrow) if hrow is not None else None
@@ -220,7 +234,9 @@ def make_combined_cache(cor2_folder,hi_folder,spacecraft,start,end,cadence,base_
 			pair=(str(hprev[1]),str(hrow[1]))
 			if pair not in hi_flows:
 				hi_flows.clear()
-				hi_flows[pair]=zone_flow(np.nan_to_num(hp),np.nan_to_num(h),hv) if hdt<=hi_max_gap else None
+				if flow_input=='intensity':hi_flows[pair]=zone_flow(np.nan_to_num(hp),np.nan_to_num(h),hv) if hdt<=hi_max_gap else None
+				elif hb is None:hi_flows[pair]=(np.zeros(cv.shape,'float32'),np.zeros(cv.shape,'float32'),np.zeros(cv.shape,bool))
+				else:hi_flows[pair]=zone_flow(np.nan_to_num(hp-hb),np.nan_to_num(h-hb),hv&np.isfinite(hb)) if hdt<=hi_max_gap else None
 			hf=hi_flows[pair]
 			if hf is not None and dt<=max_gap:
 				f=dt/hdt  # HI displacement over the COR2 pair duration
@@ -251,12 +267,12 @@ def make_combined_cache(cor2_folder,hi_folder,spacecraft,start,end,cadence,base_
 			d[name]=np.where(d['cor2_zone'],d[name]/scale['COR2'],np.where(d['hi_zone'],d[name]/scale['HI'],0.)).astype('float32')
 		np.savez_compressed(out/(tag+'.npz'),**d)
 	(out/'combined_scales.json').write_text(json.dumps(dict(COR2_sigma=scale['COR2'],COR2_unit='ct (Helioviewer)' if key[0] else unit,
-		HI_sigma=scale['HI'],HI_unit='DN/s' if level=='0.5' else 'Level-1 BUNIT',HI_level=level,seam_rsun=seam,
+		HI_sigma=scale['HI'],HI_unit='DN/s' if level=='0.5' else 'Level-1 BUNIT',HI_level=level,seam_rsun=seam,flow_input=flow_input,
 		note='Differences saved divided by these noise scales'),indent=2))
 	(out/'times.json').write_text(json.dumps(times,indent=2))
 	print(f'Noise scales: COR2 {scale["COR2"]:.4g}, {hi_detector} {scale["HI"]:.4g} (differences now in sigma units)',flush=True)
 	apply_noise_model(out,noise_model,ring_step_rsun,ring_strength)
-	if hi_flow_clean:hi_clean_flow(out,hi_max_gap=hi_max_gap)
+	if hi_flow_clean:hi_clean_flow(out,hi_max_gap=hi_max_gap,flow_input=flow_input)
 	return out
 
 ZONES=('cor2_zone','hi_zone')
@@ -368,7 +384,7 @@ def star_drift(m_from,m_to,grid,points=((-30,0),(-60,0))):
 		v.append((s.Tx.to_value(u.arcsec)/rs-X,s.Ty.to_value(u.arcsec)/rs-Y))
 	return np.mean(v,axis=0)/pxs
 
-def hi_clean_flow(out,star_filter_px=3,bg_percentile=10.,neighbours=3,hi_max_gap=5400.,force=False):
+def hi_clean_flow(out,star_filter_px=3,bg_percentile=10.,neighbours=3,hi_max_gap=5400.,force=False,flow_input='intensity'):
 	"""Recompute the HI flow of a cache from background-cleaned HI images.
 
 	Raw HI intensity is dominated by stars and diffuse starlight, which drift
@@ -382,9 +398,15 @@ def hi_clean_flow(out,star_filter_px=3,bg_percentile=10.,neighbours=3,hi_max_gap
 	are rescaled to each frame's COR2 pair duration as before. COR2 flow and all
 	differences are untouched. Works on existing caches; recorded as
 	hi_flow='clean' in combined_scales.json, so repeating it does nothing.
+
+	flow_input='base_difference' (V1): TV-L1 on cleaned(sum) - cleaned(base sum),
+	base sum = times[tag]['hi_base_time']; the row window is widened to include
+	the base sum and its neighbours. Without a base sum the frame's HI pixels get
+	quality=False (warning). Recorded as flow_input in combined_scales.json.
 	"""
+	check_flow_input(flow_input)
 	out=Path(out);info=json.loads((out/'combined_scales.json').read_text())
-	if info.get('hi_flow')=='clean' and not force:
+	if info.get('hi_flow')=='clean' and info.get('flow_input','intensity')==flow_input and not force:
 		print('HI flow already from cleaned images',flush=True);return out
 	times=json.loads((out/'times.json').read_text())
 	srcs=[it['hi_source'] for it in times.values() if it.get('hi_source')]
@@ -400,6 +422,9 @@ def hi_clean_flow(out,star_filter_px=3,bg_percentile=10.,neighbours=3,hi_max_gap
 	with np.load(out/'coordinates.npz') as c:R=np.hypot(c['x_rsun'],c['y_rsun'])
 	t0=min(Time(it['hi_previous_time']) for it in times.values() if it.get('hi_previous_time'))
 	t1=max(Time(it['hi_time']) for it in times.values() if it.get('hi_time'))
+	if flow_input=='base_difference':
+		bt=[Time(it['hi_base_time']) for it in times.values() if it.get('hi_base_time')]
+		if bt:t0=min(t0,min(bt))
 	pad=(neighbours+1)*3*3600.
 	rows=[r for r in rows if (t0-r[0]).sec<=pad and (r[0]-t1).sec<=pad]
 	print(f'HI clean flow: {len(rows)} sums, F-corona p{bg_percentile:g}, star median of +-{neighbours}',flush=True)
@@ -431,12 +456,18 @@ def hi_clean_flow(out,star_filter_px=3,bg_percentile=10.,neighbours=3,hi_max_gap
 		i,j=index.get(it['hi_time'][:19]),index.get(it['hi_previous_time'][:19])
 		if i is None or j is None:
 			warnings.warn(f'{tag}: HI sums not found for clean flow; HI flow left blank');i=j=None
+		k=None
+		if flow_input=='base_difference' and i is not None:
+			k=index.get(it['hi_base_time'][:19]) if it.get('hi_base_time') else None
+			if k is None:
+				warnings.warn(f'{tag}: no HI1 base sum; HI1 flow quality set False');i=j=None
 		with np.load(out/(tag+'.npz')) as z:d={k:z[k] for k in z.files}
 		hv=d['hi_zone']&(d['valid_running'] if 'valid_running' in d else d['valid'])
 		dt=(Time(it['datetime'])-Time(it['previous_time'])).sec;hdt=float(it['hi_pair_seconds'])
 		if i is not None and hdt<=hi_max_gap:
 			if (j,i) not in pairs:
 				pairs.clear();a,b=clean(j),clean(i)
+				if k is not None:a,b=a-clean(k),b-clean(k)  # clean() memoises, so cleaned(base) is computed once
 				ok=hv&np.isfinite(a)&np.isfinite(b)
 				pairs[(j,i)]=zone_flow(np.nan_to_num(a),np.nan_to_num(b),ok)
 			fx,fy,fq=pairs[(j,i)];f=dt/hdt
@@ -445,7 +476,52 @@ def hi_clean_flow(out,star_filter_px=3,bg_percentile=10.,neighbours=3,hi_max_gap
 		else:
 			d['quality']=np.where(hv,False,d['quality'])
 		np.savez_compressed(out/(tag+'.npz'),**d)
-	info.update(hi_flow='clean',hi_flow_note=f'TV-L1 on HI sums minus F-corona (p{bg_percentile:g}) minus star-aligned median of +-{neighbours} sums')
+	info.update(hi_flow='clean',hi_flow_note=f'TV-L1 on HI sums minus F-corona (p{bg_percentile:g}) minus star-aligned median of +-{neighbours} sums'+
+		(' minus the same for the base sum' if flow_input=='base_difference' else ''))
+	info['flow_input']=flow_input
 	(out/'combined_scales.json').write_text(json.dumps(info,indent=2))
 	print('HI flow recomputed from cleaned images',flush=True)
+	return out
+
+def recompute_flow(out,flow_input,force=False,hi_max_gap=5400.):
+	"""Rewrite dx, dy, quality of an existing cache for flow_input; return out.
+
+	Combined COR2+HI1 caches (combined_scales.json): the COR2 zone is recomputed
+	from times.json source/base_source (first predecessor found beside its
+	source); the HI1 zone through hi_clean_flow(force=True) from the hi_source
+	folder, i.e. from cleaned HI sums. Single-instrument caches are passed to
+	motion_inputs.recompute_flow. Differences, masks and the noise model
+	are untouched; frames whose flow was skipped stay skipped. Repeating the
+	recorded flow_input does nothing unless force=True. Edits out in place:
+	copy the cache folder first to keep the original.
+	"""
+	check_flow_input(flow_input);out=Path(out)
+	if not (out/'combined_scales.json').is_file():return motion_inputs.recompute_flow(out,flow_input,force)
+	info=json.loads((out/'combined_scales.json').read_text())
+	if info.get('flow_input','intensity')==flow_input and not force:
+		print(f'Flow input already {flow_input}: {out}',flush=True);return out
+	times=json.loads((out/'times.json').read_text())
+	grid=load_map(out/'reference_grid.fits');yy,xx=np.indices(grid.data.shape)
+	coords=grid.pixel_to_world(xx*u.pix,yy*u.pix)
+	@__import__('functools').lru_cache(maxsize=3)
+	def image(p):
+		m=load_map(p);return sample(m,m.data,coords)
+	prev_src=None
+	for tag,it in times.items():
+		p=out/(tag+'.npz')
+		with np.load(p) as z:d={k:z[k] for k in z.files}
+		if prev_src is None:prev_src=str(find_predecessor(it['source'],it['previous_time'],'COR2'))
+		cv=d['cor2_zone']
+		cq=d['quality']&cv
+		if cq.any() or d['dx'][cv].any() or d['dy'][cv].any():  # COR2 flow was computed for this frame
+			b=image(it['base_source'])
+			fx,fy,fq=zone_flow(*flow_pair(*map(np.nan_to_num,(image(prev_src),image(it['source']),b)),flow_input),cv&np.isfinite(b))
+			d['dx']=np.where(cv,fx,d['dx']).astype('float32');d['dy']=np.where(cv,fy,d['dy']).astype('float32')
+			d['quality']=np.where(cv,fq,d['quality'])
+			np.savez_compressed(p,**d)
+		print(f'{it["datetime"]} | COR2 flow from {flow_input}',flush=True)
+		prev_src=it['source']
+	info['flow_input']=flow_input
+	(out/'combined_scales.json').write_text(json.dumps(info,indent=2))
+	hi_clean_flow(out,hi_max_gap=hi_max_gap,force=True,flow_input=flow_input)
 	return out

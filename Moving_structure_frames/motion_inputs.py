@@ -1,4 +1,15 @@
-"""Build the renderer inputs from a local coronagraph FITS sequence."""
+"""Build the renderer inputs from a local coronagraph FITS sequence.
+
+flow_input chooses the images that enter TV-L1:
+  'intensity'        consecutive aligned intensity frames (default; identical to earlier versions);
+  'base_difference'  frame - base for both frames of each pair (same base, so a
+                     moving structure keeps its sign between them).
+The choice is recorded as flow_input in the cache's noise_scales.json.
+Differences, masks and the noise model are unchanged.
+
+Importable: flow, make_motion_cache, select_family, recompute_flow,
+check_flow_input, spacecraft_id, inventory, product_groups.
+"""
 from pathlib import Path
 import json
 import numpy as np
@@ -25,6 +36,17 @@ def flow(a,b,valid):
 	err=np.hypot(dx+ndi.map_coordinates(bx,coords,order=1),dy+ndi.map_coordinates(by,coords,order=1))
 	q=valid&(err<1.5)&(ndi.map_coordinates(valid.astype(float),coords,order=0)>.5)
 	return dx,dy,q
+
+FLOW_INPUTS=('intensity','base_difference')
+
+def check_flow_input(flow_input):
+	"""Return flow_input if it is 'intensity' or 'base_difference'; else raise ValueError."""
+	if flow_input not in FLOW_INPUTS:raise ValueError(f"flow_input must be 'intensity' or 'base_difference', not {flow_input!r}.")
+	return flow_input
+
+def flow_pair(a,b,base,flow_input):
+	"""Images entering TV-L1 for the pair (a earlier, b later): intensity or minus the shared base."""
+	return (a,b) if flow_input=='intensity' else (a-base,b-base)
 
 def spacecraft_id(value):
 	return str(value).upper().replace('_','').replace('-','').replace(' ','').replace('AHEAD','A').replace('BEHIND','B')
@@ -103,8 +125,13 @@ def family_priority(key,prefer_helioviewer=True):
 	if key[2][-1] in ('msb','bsun','b_sun','meansolarbrightness'):return 0
 	return 2 if prefer_helioviewer else 1
 
-def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,reference_lookback,max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True):
-	"""Select local exposures, align angular grids, and compute adjacent TV-L1 flow."""
+def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,reference_lookback,max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True,flow_input='intensity'):
+	"""Select local exposures, align angular grids, and compute adjacent TV-L1 flow.
+
+	flow_input: 'intensity' (default, as motion_inputs) or 'base_difference'.
+	Saves the cache files in out and flow_input in out/noise_scales.json.
+	"""
+	check_flow_input(flow_input)
 	out=Path(out);out.mkdir(parents=True,exist_ok=True)
 	start,end,base_time=map(Time,(start,end,base_time))
 	if end<start or base_time>start or cadence<=0 or max_image_dt<0 or reference_lookback<=0 or npix<64:
@@ -112,7 +139,7 @@ def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,ref
 	targets=np.arange(0,(end-start).sec+1e-6,cadence)
 	key,selected,previous,base,_=select_family(folder,detector,spacecraft,start,end,targets,base_time,
 		reference_lookback,max_image_dt,out,prefer_helioviewer)
-	return _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out)
+	return _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input)
 
 def select_family(folder,detector,spacecraft,start,end,targets,base_time,reference_lookback,max_image_dt,out,prefer_helioviewer=True):
 	"""Choose one product family (route + coverage); write coverage_report.csv in out.
@@ -145,7 +172,7 @@ def select_family(folder,detector,spacecraft,start,end,targets,base_time,referen
 	_,key,selected,previous,base,missing,_=best
 	return key,selected,previous,base,missing
 
-def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out):
+def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input='intensity'):
 	"""Align the chosen family on one angular grid and save differences and TV-L1 flow."""
 	print(f'{detector}: using one FITS group ({key[2][0] or key[2][1] or key[2][2] or key[1] or "header provenance"}, BUNIT={key[2][-1]}, {len(selected)} event exposures)',flush=True)
 	ref=load_map(selected[0][1])
@@ -189,11 +216,74 @@ def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_i
 		t,p,_=row;im,iv,obs=align(row)
 		dt=(t-prev[0]).sec;valid=iv&av&bv
 		if not valid.any():raise ValueError(f'No valid overlap at {t.isot}. Check image WCS and radial mask.')
-		dx,dy,q=flow(a,im,valid) if dt<=max_gap else (np.zeros_like(im),np.zeros_like(im),np.zeros_like(valid))
+		dx,dy,q=flow(*flow_pair(a,im,b,flow_input),valid) if dt<=max_gap else (np.zeros_like(im),np.zeros_like(im),np.zeros_like(valid))
 		tag=t.strftime('structures_%Y%m%d_%H%M%S')
 		np.savez_compressed(out/(tag+'.npz'),valid=valid,dx=dx,dy=dy,quality=q,base_difference=im-b,running_difference=im-a)
 		times[tag]=dict(datetime=t.isot,previous_time=prev[0].isot,source=str(p),base_source=str(base[1]),base_time=base[0].isot,**obs)
 		print(f'{t.isot} | Δt={dt/60:.1f} min',flush=True)
 		prev,a,av=row,im,iv
 	(out/'times.json').write_text(json.dumps(times,indent=2))
+	_set_state(out,flow_input)
+	return out
+
+STATE='noise_scales.json'
+
+def _set_state(out,flow_input):
+	"""Record flow_input in out/noise_scales.json, keeping its other keys."""
+	f=Path(out)/STATE;info=json.loads(f.read_text()) if f.is_file() else dict(noise_model='none')
+	info['flow_input']=flow_input;f.write_text(json.dumps(info,indent=2))
+
+def find_predecessor(source,previous_time,detector):
+	"""Path of the exposure at previous_time in the same folder and product family as source."""
+	groups=product_groups(inventory(Path(source).parent,detector,None))
+	for group in groups.values():
+		if any(str(r[1])==str(source) for r in group):
+			hit=[r[1] for r in group if r[0].isot[:19]==Time(previous_time).isot[:19]]
+			if hit:return hit[0]
+	raise FileNotFoundError(f'No {detector} exposure at {previous_time} beside {source}.')
+
+def grid_coords(out):
+	"""Helioprojective coordinates of the cache grid (reference_grid.fits)."""
+	ref=load_map(Path(out)/'reference_grid.fits');yy,xx=np.indices(ref.data.shape)
+	return ref,ref.pixel_to_world(xx*u.pix,yy*u.pix)
+
+def align_image(path,coords):
+	"""Image at path sampled at the grid's helioprojective angles (NaN outside), as in _build_cache."""
+	from astropy.coordinates import SkyCoord
+	m=load_map(path);w=SkyCoord(coords.Tx,coords.Ty,frame=m.coordinate_frame);sx,sy=m.world_to_pixel(w)
+	return ndi.map_coordinates(np.asarray(m.data,dtype='float32'),[sy.value,sx.value],order=1,mode='constant',cval=np.nan)
+
+def is_gap_frame(d):
+	"""True when a frame's flow was skipped (pair longer than max_gap): dx, dy all zero, no quality."""
+	return not d['quality'].any() and not d['dx'].any() and not d['dy'].any()
+
+def recompute_flow(out,flow_input,force=False):
+	"""Rewrite dx, dy, quality of an existing single-instrument cache for flow_input.
+
+	Images are reloaded from the paths in times.json (source, base_source; the
+	first frame's predecessor is found beside its source), so no download is
+	needed. Differences, masks and the noise model are untouched. Frames whose
+	flow was skipped (pair longer than max_gap) stay skipped. Repeating the
+	recorded flow_input does nothing unless force=True. Edits out in place:
+	copy the cache folder first to keep the original. Returns out.
+	"""
+	check_flow_input(flow_input);out=Path(out)
+	f=out/STATE;info=json.loads(f.read_text()) if f.is_file() else {}
+	if info.get('flow_input','intensity')==flow_input and not force:
+		print(f'Flow input already {flow_input}: {out}',flush=True);return out
+	times=json.loads((out/'times.json').read_text())
+	ref,coords=grid_coords(out);detector=str(ref.meta.get('detector','')).upper()
+	image=__import__('functools').lru_cache(maxsize=3)(lambda p:align_image(p,coords))
+	prev_src=None
+	for tag,it in times.items():
+		p=out/(tag+'.npz')
+		with np.load(p) as z:d={k:z[k] for k in z.files}
+		if prev_src is None:prev_src=str(find_predecessor(it['source'],it['previous_time'],detector))
+		if not is_gap_frame(d):
+			b=image(it['base_source']);valid=d['valid']&np.isfinite(b)
+			d['dx'],d['dy'],d['quality']=flow(*flow_pair(*map(np.nan_to_num,(image(prev_src),image(it['source']),b)),flow_input),valid)
+			np.savez_compressed(p,**d)
+		print(f'{it["datetime"]} | flow from {flow_input}',flush=True)
+		prev_src=it['source']
+	_set_state(out,flow_input)
 	return out

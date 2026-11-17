@@ -54,6 +54,10 @@ from combined_frame_pipeline import make_combined_frames
 #     in the rectangle (large AR-rooted loops, tallest first); 0 needs both inside.
 # show_velocity_vectors: 1 draws the edge and centroid velocity arrows and speed colour
 #     bar; 0 shows contours only (same layout). Flow and vector CSVs are still saved.
+# flow_input: images entering TV-L1 flow. 'intensity' (default, as the original
+#     launcher) or 'base_difference' (frame - base, same base for both frames of a
+#     pair; removes the static instrument level, radial gradient and F-corona).
+#     A reused cache must have the same flow_input (recompute_flow on a copy).
 # reuse_cache: blank builds a new motion cache (download, alignment, flow).
 #     'latest' or a motion_cache folder skips all that and only redraws frames
 #     (and switches that cache's noise_model, reversibly). Fast for trying
@@ -105,6 +109,7 @@ ring_step_rsun=3.       # Ring width for the noise profile, Rsun
 ring_strength=.7        # 1 = full local-noise units; 0 = global. 0.7 keeps inner-HI1 bright
                         # features and the faint outer arcs (tested on 2025-05-31)
 reuse_cache=''          # '' new cache; 'latest' or a cache folder to redraw only
+flow_input='intensity'  # TV-L1 input: 'intensity' or 'base_difference'
 hi_flow_clean=1         # 1: HI1 flow from images with F-corona and star field removed
                         # (raw HI1 flow tracks the sunward star drift, ~1 px / 40 min)
 
@@ -254,7 +259,7 @@ if __name__=='__main__':
 		EUVI_fold=blank(EUVI_fold),EUVI_wave=EUVI_wave,EUVI_dT=EUVI_dT,disk_max_minutes=disk_max_minutes,
 		pfss_needed=pfss_needed,pfss_dir=pfss_dir,gong_cache=gong_cache,PFSS_dT=PFSS_dT,
 		rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat,
-		noise_model=noise_model,ring_step_rsun=ring_step_rsun,ring_strength=ring_strength,hi_flow_clean=bool(hi_flow_clean),reuse_cache=blank(reuse_cache),
+		noise_model=noise_model,ring_step_rsun=ring_step_rsun,ring_strength=ring_strength,hi_flow_clean=bool(hi_flow_clean),reuse_cache=blank(reuse_cache),flow_input=flow_input,
 		user_datacsv=user_datacsv,goes_folder=goes_folder,goes_download=goes_download,
 		goes_pickle=blank(goes_pickle),goes_csv=blank(goes_csv),outdir=outdir,final_image_folder=final_image_folder,
 		# Settings passed straight to track_coronagraph_flows.render_frames

@@ -1,5 +1,9 @@
 """STEREO COR2 + HI1 moving-structure frames: download, combined cache, render.
 
+flow_input 'intensity' (default) or 'base_difference' selects the TV-L1 input (see combined_motion_inputs). A
+reused cache must have been built (or recomputed) for the same flow_input.
+The value is added to parameters.json.
+
 Same steps as motion_frame_pipeline.make_frames for STEREO, with two changes:
 HI1 sums are fetched through Multiwb_datamine.get_STEREO_imgs (route
 Level-1 -> Helioviewer -> Level-0.5), and the motion cache is the combined
@@ -7,12 +11,13 @@ COR2+HI1 grid from combined_motion_inputs. Only one difference panel
 (base or running) is drawn above the LAT/GOES light curves.
 """
 from pathlib import Path
-import tempfile
+import tempfile,json
 from astropy.time import Time
 import astropy.units as u
 from datamine_calib_helper import load_map
 from prepare_sources import fill_coronagraph,fill_disk,prepare_pfss,ensure_hv_coronagraph,ensure_hv_disk
-from combined_motion_inputs import make_combined_cache,apply_noise_model,hi_clean_flow
+from combined_motion_inputs import make_combined_cache,apply_noise_model,hi_clean_flow,check_flow_input
+from motion_frame_pipeline_V1 import check_cache_flow_input,record_flow_input
 from goes_cache import resolve_goes_pickle
 from track_coronagraph_flows import render_frames
 
@@ -24,7 +29,7 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 	pfss_needed,pfss_dir,gong_cache,PFSS_dT,rss,nrho,r_seed,n_lon,n_lat,
 	user_datacsv,goes_folder,goes_download,goes_pickle,goes_csv,outdir,final_image_folder,
 	noise_model='ring',ring_step_rsun=3.,ring_strength=.7,hi_flow_clean=True,reuse_cache=None,
-	**render):
+	flow_input='intensity',**render):
 	"""Prepare and render one event; render holds the remaining render_frames settings.
 
 	reuse_cache: None builds a new motion cache (downloads, alignment, flow).
@@ -32,6 +37,7 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 	cache's noise model is switched to noise_model (reversible), then frames are
 	rendered for sT-eT from it.
 	"""
+	check_flow_input(flow_input)
 	root=Path(input_folder).expanduser().resolve()
 	def source(path):
 		return root/Path(path).expanduser() if path is not None else None
@@ -65,6 +71,7 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 			motion_cache=Path(reuse_cache).expanduser()
 			if not motion_cache.is_absolute():motion_cache=root/motion_cache
 		if not (motion_cache/'times.json').is_file():raise FileNotFoundError(f'Not a motion cache: {motion_cache}')
+		check_cache_flow_input(motion_cache,flow_input)
 		print(f'Redraw only, reusing {motion_cache}',flush=True)
 		download=False
 	#### COR2: same route and coverage check as the single-instrument flow code ####
@@ -87,7 +94,7 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 			print(f'HI1: download unsuccessful; continuing with local files: {exc}',flush=True)
 	if reuse_cache:
 		apply_noise_model(motion_cache,noise_model,ring_step_rsun,ring_strength)
-		if hi_flow_clean:hi_clean_flow(motion_cache,hi_max_gap=hi_max_gap)  # upgrades older caches once
+		if hi_flow_clean:hi_clean_flow(motion_cache,hi_max_gap=hi_max_gap,flow_input=flow_input)  # upgrades older caches once
 	else:
 		motion_cache=Path(tempfile.mkdtemp(prefix=f'{craft}_COR2_HI1_',dir=cache_root))
 		make_combined_cache(folder,folder,craft,sT,eT,dT,base_diff_DT,reference_lookback,max_image_dt,
@@ -95,7 +102,7 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 			hi_max_image_dt=hi_max_image_dt,hi_lookback=hi_lookback,hi_max_gap=hi_max_gap,
 			hi_star_filter_px=hi_star_filter_px,hi_edge_px=hi_edge_px,seam_rsun=seam_rsun,
 			spoke_pa=spoke_pa,spoke_halfwidth=spoke_halfwidth,spoke_arrow_buffer_deg=spoke_arrow_buffer_deg,
-			noise_model=noise_model,ring_step_rsun=ring_step_rsun,ring_strength=ring_strength,hi_flow_clean=hi_flow_clean)
+			noise_model=noise_model,ring_step_rsun=ring_step_rsun,ring_strength=ring_strength,hi_flow_clean=hi_flow_clean,flow_input=flow_input)
 	#### EUVI disk and PFSS, as before ####
 	disk_folder=source(EUVI_fold)
 	if disk_folder is not None:
@@ -112,12 +119,14 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 			raise FileNotFoundError(f'No saved PFSS model in {model}.')
 	SRS_file=render.pop('SRS_file',None)
 	# Spoke masking already applied to the COR2 zone of the cache.
+	frames=source(final_image_folder) if final_image_folder else dest/'frames'
 	render_frames(motion_cache,panel_keys=(panel,),sT=sT,eT=eT,LASCO='COR2+HI1',SDO_fold=None,
 		EUVI_fold=disk_folder,pfss_dir=model,outdir=dest,
-		final_image_folder=source(final_image_folder) if final_image_folder else dest/'frames',
+		final_image_folder=frames,
 		SDO_instrument=None,SDO_product=None,EUVI_wave=EUVI_wave,SRS_file=source(SRS_file),
 		user_datacsv=source(user_datacsv),goes_pickle=goes_p,goes_csv_input=goes_c,
 		pfss_needed=pfss_needed,pfss_models=pfss_models,disk_max_minutes=disk_max_minutes,
 		spoke_pa=spoke_pa,spoke_halfwidth=0.,spoke_arrow_buffer_deg=0.,
 		max_gap_seconds=max_gap_seconds,**render)
+	record_flow_input(frames,flow_input)
 	return motion_cache

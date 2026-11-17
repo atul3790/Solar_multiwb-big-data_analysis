@@ -118,6 +118,10 @@ from motion_frame_pipeline_V1 import make_frames_V1
 # ring_strength: 1 = full local-noise units; 0 = global. 0.7 keeps bright inner features.
 # show_velocity_vectors: 1 draws the edge and centroid velocity arrows and speed colour
 #     bar; 0 shows contours only (same layout). Flow and vector CSVs are still saved.
+# flow_input: images entering TV-L1 flow. 'intensity' (default, as the original
+#     launcher) or 'base_difference' (frame - base, same base for both frames of a
+#     pair; removes the static instrument level, radial gradient and F-corona).
+#     A reused cache must have the same flow_input (recompute_flow on a copy).
 # reuse_cache: blank builds a new V1 motion cache. 'latest' (newest V1 cache in
 #     outdir/motion_cache) or a cache folder redraws only: no downloads, alignment
 #     or flow; that cache's noise_model is switched (reversibly). Fast for tuning
@@ -264,6 +268,7 @@ noise_model='ring'      # 'ring', 'global' or 'none' (input image units, as the 
 ring_step_rsun=1.       # Ring width for the noise profile, Rsun
 ring_strength=.7        # 1 = full local-noise units; 0 = global
 reuse_cache=''          # '' new cache; 'latest' or a V1 cache folder to redraw only
+flow_input='intensity'  # TV-L1 input: 'intensity' or 'base_difference'
 diff_panel='both'       # 'both', 'base' or 'running'
 display_stretch='asinh' # 'asinh' or 'linear'
 display_soft=1.         # asinh linear range, sigma
@@ -406,6 +411,6 @@ if __name__=='__main__':
 		centroid_arrow_length_pixels=centroid_arrow_length_pixels, speed_bins=speed_bins, plot_style=plot_style,
 		dpi=dpi, outdir=outdir, final_image_folder=final_image_folder,
 		noise_model=noise_model, ring_step_rsun=ring_step_rsun, ring_strength=ring_strength,
-		reuse_cache=blank(reuse_cache), diff_panel=diff_panel, display_stretch=display_stretch,
+		reuse_cache=blank(reuse_cache), flow_input=flow_input, diff_panel=diff_panel, display_stretch=display_stretch,
 		display_soft=display_soft, display_limit=display_limit, display_smooth_px=display_smooth_px,
 		show_vectors=bool(show_velocity_vectors))

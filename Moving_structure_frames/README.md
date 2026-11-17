@@ -66,6 +66,7 @@ Edit only the INPUT block of a script, then run it with `python script.py` or `%
 | `make_moving_structure_frames_LASCO.py` | LASCO C2 or C3 flow frames: base and running difference panels, bright/dark contours, edge and centroid drift arrows, PFSS, an SDO disk image (HMI or AIA) and LAT/GOES curves |
 | `make_moving_structure_frames_STEREO.py` | Same for STEREO COR1 or COR2, with an EUVI disk image and PFSS projected from STEREO's viewpoint |
 | `make_moving_structure_frames_STEREO_COR2_HI1.py` | COR2 and HI1 joined on one helioprojective grid from STEREO-A, following structures out to about 90 R☉. Draws one panel (`diff_panel='base'` or `'running'`). |
+| `flow_input_comparison.py` | Compares the flow of two caches built with different `flow_input` (quality fraction, speed, angle difference, time since base); CSV and PNG |
 | `make_LASCO_overlay_frames.py` | LASCO difference images with HMI/AIA disk, global and AR-focused PFSS lines, and LAT/GOES panels |
 | `make_STEREO_overlay_frames.py` | STEREO COR1/COR2 difference images with EUVI disk and observer-projected PFSS, plus LAT/GOES panels |
 | `make_PSP_WISPR_overlay_frames.py` | PSP/WISPR field of view with a PFSS spherical-shell wireframe and projected field lines, plus LAT/GOES panels |
@@ -98,16 +99,17 @@ Steps 1–3 build the motion cache, which is slow (downloads, alignment and flow
 
 | Module | Role | Main functions |
 |---|---|---|
-| `motion_frame_pipeline_V1.py` | One LASCO or STEREO event from download to frames, with sigma-unit noise model, asinh display and redraw mode | `make_frames_V1` |
-| `combined_frame_pipeline.py` | COR2 and HI1 event: COR2 route, HI1 through `get_STEREO_imgs`, combined cache, render | `make_combined_frames` |
+| `motion_frame_pipeline_V1.py` | One LASCO or STEREO event from download to frames, with sigma-unit noise model, asinh display, redraw mode and `flow_input` | `make_frames_V1` |
+| `combined_frame_pipeline.py` | COR2 and HI1 event: COR2 route, HI1 through `get_STEREO_imgs`, combined cache (with `flow_input`), render | `make_combined_frames` |
 | `motion_frame_pipeline.py` | Earlier pipeline with differences in input image units. No launcher uses it now; kept for reference. | `make_frames` |
 
 ### Building the motion cache
 
 | Module | Role | Main functions |
 |---|---|---|
-| `motion_inputs.py` | Inventories local coronagraph FITS and groups them into product families (Level-1, Helioviewer, Level-0.5). Picks one family covering the event, aligns exposures on one angular grid, writes base/running differences and TV-L1 flow. | `inventory`, `select_family`, `make_motion_cache`, `flow` |
-| `combined_motion_inputs.py` | COR2 and HI1 on one helioprojective grid, each differenced against itself and scaled by its own noise. HI1 flow is computed after removing the F-corona and the drifting star field. | `make_combined_cache`, `combined_grid`, `apply_noise_model`, `hi_clean_flow`, `star_drift` |
+| `motion_inputs.py` | Inventories local coronagraph FITS and groups them into product families (Level-1, Helioviewer, Level-0.5). Picks one family covering the event, aligns exposures on one angular grid, writes base/running differences and TV-L1 flow on intensity or base differences (`flow_input`, recorded in `noise_scales.json`). `recompute_flow` rewrites `dx`, `dy`, `quality` of an existing cache for the other input from the images listed in `times.json`. | `inventory`, `select_family`, `make_motion_cache`, `flow`, `recompute_flow` |
+| `combined_motion_inputs.py` | COR2 and HI1 on one helioprojective grid, each differenced against itself and scaled by its own noise. HI1 flow is computed after removing the F-corona and the drifting star field. `flow_input='base_difference'` uses frame − base in COR2 and cleaned sum − cleaned base sum in HI1 (recorded in `combined_scales.json`). | `make_combined_cache`, `combined_grid`, `apply_noise_model`, `hi_clean_flow`, `star_drift`, `recompute_flow` |
+| `flow_input_comparison.py` | Per-frame (and per-zone) flow comparison of two caches, plus region counts from both renders' `regions.csv` | `compare_flow_inputs`, `zone_stats` |
 | `single_noise_model.py` | Puts single-instrument differences in noise-sigma units, optionally divided by a radial noise profile. Reversible, with the state kept in the cache. | `apply_noise_model`, `noise_scale`, `ring_noise_profile` |
 | `prepare_sources.py` | Fills missing image bins through Solar_data_mining. Converts Helioviewer JP2s to FITS where science FITS are missing. Builds UTC-anchored PFSS snapshots. | `fill_coronagraph`, `fill_disk`, `ensure_hv_coronagraph`, `ensure_hv_disk`, `prepare_pfss`, `stereo_root` |
 | `goes_cache.py` | Finds a cached GOES pickle covering the window, or downloads one | `resolve_goes_pickle`, `covering_pickle` |
@@ -146,9 +148,11 @@ These are the less obvious ones; the guide above each INPUT block documents ever
 | `trace_longARrooted_loops` | 1 keeps closed loops with one footpoint in the AR rectangle, so long AR loops are shown. 0 needs both footpoints inside. |
 | `AR_loop_reach_deg` | Closed AR loops are drawn only if both ends lie within this distance (degrees on the Sun) of the NOAA centre; default 50. Keeps AR–quiet-Sun and AR–AR connectors and drops longer PFSS loops (e.g. to the polar caps, where PFSS is least reliable). `''` = no limit. Selection only: cached traces are reused. |
 | `n_AR_open`, `n_closed`, `n_open` | Maximum magenta AR open lines, AR closed loops and global open lines drawn. Drawing only; cached lines are kept. |
+| `pfss_linewidth`, `xlabel`, `ylabel`, `xticks`, `yticks`, `xlabel_size`, `ylabel_size`, `xtick_size`, `ytick_size` | PFSS line width and axis labels/sizes. Same in the flow launchers and the LASCO/STEREO overlay makers. Overlay axes are in solar radii, symmetric about Sun centre and rounded out to the next multiple of 10 (else 5) R☉ within 3 R☉, with minor ticks every 5 R☉. |
 | `show_velocity_vectors` | 0 draws contours only, with the same layout. Vectors are still saved in the CSVs. |
 | `save_PFSS_maps` | PFSS maps at the sT–eT midpoint in `basedir` (`PFSS_*.png`), on the chosen disk image (nearest cached one first) or a blank Stonyhurst-grid disk with the AR rectangle (`solar_overlay.pfss_context_maps`). `True`/`'both'`, `'full'` (full Sun only), `'AR'` (AR only) or `False` (skip, e.g. on reruns). In all six frame makers. |
 | `speed_bins` | Colour bands for projected speed (km/s) |
+| `flow_input` | Flow launchers. Images entering TV-L1: `'intensity'` (default, identical to earlier versions) or `'base_difference'` (frame − base for both frames of a pair, so the static instrument level, radial gradient and F-corona drop out). Detection is unchanged. A reused cache must have the same `flow_input`; to switch, copy the cache folder and run `recompute_flow(copy, flow_input)`. |
 | `hi_flow_clean` | COR2 + HI1: compute HI1 flow on F-corona- and star-removed images. Without it the star field drifting with the spacecraft pulls arrows sunward. |
 
 ## Outputs
