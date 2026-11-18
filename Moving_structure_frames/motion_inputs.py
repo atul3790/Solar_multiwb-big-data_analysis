@@ -4,11 +4,16 @@ flow_input chooses the images that enter TV-L1:
   'intensity'        consecutive aligned intensity frames (default; identical to earlier versions);
   'base_difference'  frame - base for both frames of each pair (same base, so a
                      moving structure keeps its sign between them).
-The choice is recorded as flow_input in the cache's noise_scales.json.
+flow_bin runs TV-L1 on flow_bin x flow_bin pixel blocks (displacements scaled
+back to grid pixels); 'auto' picks it from the grid pixel size and frame spacing
+so a 1500 km/s structure moves ~10 flow pixels per frame (auto_flow_bin: LASCO
+C2 at npix=512 -> 6, C3 -> 1). flow_bin=1 is the direct flow.
+Both choices are recorded in the cache's noise_scales.json (flow_bin when >1).
 Differences, masks and the noise model are unchanged.
 
 Importable: flow, make_motion_cache, select_family, recompute_flow,
-check_flow_input, spacecraft_id, inventory, product_groups.
+auto_flow_bin, resolve_flow_bin, check_flow_input, spacecraft_id, inventory,
+product_groups.
 """
 from pathlib import Path
 import json

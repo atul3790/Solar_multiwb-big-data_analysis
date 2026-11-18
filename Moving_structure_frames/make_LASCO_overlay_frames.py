@@ -33,6 +33,103 @@ import solar_overlay as so
 import datamine_calib_helper as dh
 import Multiwb_datamine as dm
 
+#################### INPUT PARAMETER GUIDE ####################
+# Edit only the INPUT block below. Paths are relative to basedir.
+#
+# basedir: Event folder. Every relative path below is inside it; the script can be run from
+#     anywhere.
+# sT: Start of the UTC event window, YYYY-MM-DDThh:mm:ss.
+# eT: End of the UTC event window, later than sT.
+# dT: LASCO and output frame cadence, seconds.
+# SDO_dT: AIA/HMI download and coverage cadence, seconds.
+# diff_type: 'running_diff' (each image minus its predecessor) or 'base_diff' (minus the
+#     image nearest base_diff_DT).
+# first_frame_intensity: True draws the first frame as plain LASCO intensity (no reference
+#     needed); False makes it a difference too (a predecessor before sT is fetched for
+#     running_diff).
+# base_diff_DT: Quiet base-reference UTC, used only for diff_type='base_diff'.
+# LASCO: Coronagraph: 'C2' or 'C3'.
+# LASCO_imgfolder: LASCO image database folder, searched recursively; missing images are
+#     saved here.
+# SDO_fold: SDO image database root, searched recursively.
+# SDO_instrument: 'AIA' or 'HMI': the one disk image overlaid.
+# SDO_product: AIA wavelength (94, 171, 193, ...) or HMI 'magnetogram' / 'continuum'.
+# pfss_dir: Folder of saved PFSS snapshots (shared by all launchers and overlay makers);
+#     missing snapshots are built here when downloads are allowed.
+# user_datacsv: Fermi-LAT light-curve CSV (inside basedir) for the lower panel.
+# goes_pickle: Explicit GOES pickle (Time, Flux); None uses goes_folder or downloads.
+# goes_folder: GOES cache folder: a pickle spanning sT-eT is reused; downloads are saved
+#     here.
+# SRS_folder: NOAA SRS reports folder: read first, downloads saved here (shared with the
+#     other overlay makers and the flow launchers).
+# outdir: Output root for intermediate products and caches (relative to basedir).
+# final_image_folder: Folder for the finished overlay + light-curve PNG frames (relative to
+#     basedir).
+# need_LASCO_calib: Retrieval order for missing LASCO images: True = Level-1 -> Helioviewer
+#     -> Level-0.5; False = Level-1 -> Level-0.5 -> Helioviewer. Files already on disk are
+#     used as they are.
+# nproc: Number of parallel rendering workers; 1 runs serially. Lower it if memory is short.
+#
+# PFSS parameters
+# PFSS_dT: Spacing of the UTC-anchored PFSS snapshots, in HOURS. Each frame uses the nearest
+#     snapshot.
+# save_PFSS_maps: PFSS context maps at the sT-eT midpoint, saved in basedir as PFSS_*.png,
+#     on the disk image (nearest cached one first) or a blank Stonyhurst-grid disk with the
+#     AR rectangle. True or 'both', 'full' (full Sun only), 'AR' (AR only), or False (skip,
+#     e.g. on reruns).
+# rss: PFSS source-surface radius (Rsun) for new snapshots.
+# nrho: Number of radial cells in a new PFSS model.
+# r_seed: Radius (Rsun) where the global PFSS traces are seeded.
+# n_lon: Longitude samples in the global PFSS seed grid.
+# n_lat: Latitude samples in the global PFSS seed grid.
+#
+# INPUT for AR region - focussed PFSS line drawing
+# focus_AR: True adds the AR-rooted PFSS traces around NOAA_number; False draws global PFSS
+#     only.
+# NOAA_number: Full NOAA active-region number, e.g. 14100 (used when focus_AR is True); the
+#     AR position is read from NOAA SRS reports.
+# AR_time: UTC epoch for the NOAA lookup (and for a manual AR_lon/AR_lat); usually sT.
+# ar_half_lon: AR rectangle half-width in Stonyhurst longitude, degrees about the NOAA
+#     centre. Field lines are seeded over the rectangle.
+# ar_half_lat: AR rectangle half-width in Stonyhurst latitude, degrees.
+# AR_seed_spacing_deg: Seed spacing over the AR rectangle, degrees (+-12 deg at 1 deg = 25 x
+#     25 seeds). AR lines are cached per PFSS snapshot (AR_field_lines_rooted.npz, shared
+#     with the flow frames) and retraced when the rectangle or spacing changes.
+# trace_longARrooted_loops: 1 keeps closed loops with one footpoint in the rectangle (large
+#     AR-rooted loops, tallest first); 0 needs both footpoints inside.
+# AR_loop_reach_deg: Closed AR loops are drawn only if both ends lie within this distance
+#     (degrees on the Sun) of the NOAA centre; keeps AR-quiet Sun and AR-AR connectors,
+#     drops longer loops (e.g. to the polar caps). '' = no limit.
+# AR_r_seed: Start radius (Rsun) of the AR traces; low, for small closed loops.
+#
+# PFSS plot making input parameters
+# AR_closedB_col: Colour of closed AR-rooted lines.
+# AR_openB_col: Colour of open AR-rooted lines (both polarities).
+# closed_field_color: Colour of global closed PFSS lines.
+# n_open: Maximum global open PFSS traces drawn, evenly spread (as in the flow frames); ''
+#     draws all.
+# n_global_closed: Number of global closed PFSS loops drawn.
+# n_closed: Maximum AR closed loops drawn (tallest first with trace_longARrooted_loops=1);
+#     np.nan draws all.
+# n_AR_open: Maximum open AR lines drawn, spread evenly; np.nan draws all.
+# max_image_dt: Largest offset (s) between a target time and the LASCO image used for it.
+# reference_lookback: Window (s) before sT searched for the first frame's predecessor
+#     (running_diff).
+# npix: Image resampled to npix x npix before drawing (display resolution only).
+# dpi: Output PNG dots per inch.
+#
+# Plot labels and sizes (points), as in the moving-structure frames
+# pfss_linewidth: Line width in points for all PFSS lines.
+# xlabel: x-axis label (Matplotlib mathtext allowed).
+# ylabel: y-axis label.
+# xticks: x tick values in solar radii; None uses ticks every 10 (or 5) Rsun inside
+#     symmetric limits rounded out to 10 or 5 Rsun.
+# yticks: y tick values in solar radii; None as for xticks.
+# xlabel_size: Font size (points) of the x-axis label.
+# ylabel_size: Font size (points) of the y-axis label.
+# xtick_size: Font size (points) of the x tick labels.
+# ytick_size: Font size (points) of the y tick labels.
+
 #################### INPUT ##################################################################
 basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
 sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC

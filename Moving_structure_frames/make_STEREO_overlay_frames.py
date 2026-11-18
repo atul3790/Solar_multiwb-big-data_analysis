@@ -34,6 +34,114 @@ import solar_overlay as so
 import solar_overlay_helper as oh
 from pfss_projection import ar_rooted_lines  # shared AR selection with the flow frames
 
+#################### INPUT PARAMETER GUIDE ####################
+# Edit only the INPUT block below. Paths are relative to basedir.
+#
+# basedir: Event folder. Every relative path below is inside it; the script can be run from
+#     anywhere.
+# sT: Start of the UTC event window, YYYY-MM-DDThh:mm:ss.
+# eT: End of the UTC event window, later than sT.
+# dT: COR image and output frame cadence, seconds.
+# spacecraft: 'A' or 'B'.
+# instrument: 'COR1' or 'COR2'.
+# EUVI_needed: True overlays one non-differenced EUVI channel on the disk.
+# EUVI_wave: EUVI channel: 171, 195, 284 or 304 Angstrom.
+# EUVI_dT: EUVI download cadence, seconds. The overlay uses the closest available EUVI
+#     image, without a time cutoff.
+# EUVI_radius: Visible EUVI radius in solar radii (up to 1.7).
+# EUVI_BW: True shows EUVI in greyscale; False in the standard channel colours.
+# polar: COR1 polarizer angle (0, 120 or 240) of the single-polarizer FITS; ignored for
+#     COR2.
+# img_folder: STEREO database root (files in STEREO_<sc>/<instrument>), given to
+#     get_STEREO_imgs.
+# outdir: Output root for intermediate products and caches (relative to basedir).
+# final_image_folder: Folder for the finished overlay + light-curve PNG frames (relative to
+#     basedir).
+# need_GOES: True adds the GOES curve to the lower panel.
+# user_datacsv: Fermi-LAT light-curve CSV (inside basedir), as in the LASCO overlay maker.
+# goes_pickle: Optional GOES pickle (Time, Flux), e.g. the LASCO one; None uses goes_folder
+#     or downloads.
+# goes_folder: GOES cache: read if present, downloads saved here. None: <outdir>/GOES.
+# diff_type: 'running_diff', 'base_diff' or 'intensity'.
+# first_frame_intensity: True draws the first frame as intensity (no reference needed);
+#     False makes it a difference too.
+# base_diff_DT: Quiet base-reference UTC, used only for diff_type='base_diff'.
+# reference_search: Window (s) searched for the reference image (predecessor or base).
+# download: True fills missing image bins and PFSS snapshots.
+# helioviewer: True also saves/uses the original Helioviewer JP2 previews where science FITS
+#     are missing.
+# need_pfss: True loads (or builds) PFSS and draws the field lines.
+# pfss_dir: Folder of saved PFSS snapshots (shared by all launchers and overlay makers);
+#     missing snapshots are built here when downloads are allowed.
+#
+# PFSS parameters
+# PFSS_dT: Spacing of the UTC-anchored PFSS snapshots, in HOURS. Each frame uses the nearest
+#     snapshot.
+# save_PFSS_maps: PFSS context maps at the sT-eT midpoint, saved in basedir as PFSS_*.png,
+#     on the disk image (nearest cached one first) or a blank Stonyhurst-grid disk with the
+#     AR rectangle. True or 'both', 'full' (full Sun only), 'AR' (AR only), or False (skip,
+#     e.g. on reruns).
+# rss: PFSS source-surface radius (Rsun) for new snapshots.
+# nrho: Number of radial cells in a new PFSS model.
+# r_seed: Radius (Rsun) where the global PFSS traces are seeded.
+# n_lon: Longitude samples in the global PFSS seed grid.
+# n_lat: Latitude samples in the global PFSS seed grid.
+#
+# Active-region PFSS tracing
+# focus_AR: True adds the AR-rooted PFSS traces around NOAA_number; False draws global PFSS
+#     only.
+# NOAA_number: Full NOAA active-region number, e.g. 14100 (used when focus_AR is True); the
+#     AR position is read from NOAA SRS reports.
+# SRS_file: Optional local NOAA SRS report file for offline use; None reads SRS_folder.
+# SRS_folder: NOAA SRS reports folder: read first, downloads saved here (shared with the
+#     other overlay makers and the flow launchers).
+# AR_lookup_max_age: Largest age (hours) of the NOAA region summary used for the AR
+#     position.
+# AR_lon: Optional manual AR Stonyhurst longitude (deg, west +), used with AR_lat instead of
+#     NOAA_number.
+# AR_lat: Optional manual AR Stonyhurst latitude (deg, north +).
+# AR_time: UTC epoch for the NOAA lookup (and for a manual AR_lon/AR_lat); usually sT.
+# ar_half_lon: AR rectangle half-width in Stonyhurst longitude, degrees about the NOAA
+#     centre. Field lines are seeded over the rectangle.
+# ar_half_lat: AR rectangle half-width in Stonyhurst latitude, degrees.
+# AR_seed_spacing_deg: Seed spacing over the AR rectangle, degrees (+-12 deg at 1 deg = 25 x
+#     25 seeds). AR lines are cached per PFSS snapshot (AR_field_lines_rooted.npz, shared
+#     with the flow frames) and retraced when the rectangle or spacing changes.
+# trace_longARrooted_loops: 1 keeps closed loops with one footpoint in the rectangle (large
+#     AR-rooted loops, tallest first); 0 needs both footpoints inside.
+# AR_loop_reach_deg: Closed AR loops are drawn only if both ends lie within this distance
+#     (degrees on the Sun) of the NOAA centre; keeps AR-quiet Sun and AR-AR connectors,
+#     drops longer loops (e.g. to the polar caps). '' = no limit.
+# AR_r_seed: Start radius (Rsun) of the AR traces; low, for small closed loops.
+# n_closed: Maximum AR closed loops drawn (tallest first with trace_longARrooted_loops=1);
+#     np.nan draws all.
+# n_AR_open: Maximum open AR lines drawn, spread evenly; np.nan draws all.
+# AR_closedB_col: Colour of closed AR-rooted lines.
+# AR_openB_col: Colour of open AR-rooted lines (both polarities).
+# observer_location: None uses the image header, then JPL Horizons; 'W37' / 'E37' overrides
+#     the Stonyhurst longitude. No image pixels are rotated to fake another observer.
+# observer_latitude: Observer latitude (deg); None keeps the header or Horizons value.
+# observer_distance_au: Observer distance (AU); None keeps the header or Horizons value.
+# nproc: Number of parallel rendering workers; 1 runs serially. Lower it if memory is short.
+# npix: Image resampled to npix x npix before drawing (display resolution only).
+# dpi: Output PNG dots per inch.
+# n_open: Maximum global open PFSS traces drawn, evenly spread (as in the flow frames); ''
+#     draws all.
+# n_global_closed: Number of global closed PFSS loops drawn.
+# closed_color: Colour of global closed PFSS lines.
+#
+# Plot labels and sizes (points), as in the moving-structure frames
+# pfss_linewidth: Line width in points for all PFSS lines.
+# xlabel: x-axis label (Matplotlib mathtext allowed).
+# ylabel: y-axis label.
+# xticks: x tick values in solar radii; None uses ticks every 10 (or 5) Rsun inside
+#     symmetric limits rounded out to 10 or 5 Rsun.
+# yticks: y tick values in solar radii; None as for xticks.
+# xlabel_size: Font size (points) of the x-axis label.
+# ylabel_size: Font size (points) of the y-axis label.
+# xtick_size: Font size (points) of the x tick labels.
+# ytick_size: Font size (points) of the y tick labels.
+
 #################### INPUT #################################################
 basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
 sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC

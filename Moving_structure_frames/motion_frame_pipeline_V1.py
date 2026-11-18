@@ -6,6 +6,8 @@ the grid pixel size and frame spacing (motion_inputs.auto_flow_bin: C2 6, C3 1),
 an integer overrides it (1 = grid pixels, the earlier behaviour). See motion_inputs. A reused
 cache must have been built (or recomputed) for the same flow_input and flow_bin.
 Both are added to parameters.json.
+colorbar_style / speed_limits / speed_bins: speed colour bar, passed to
+track_coronagraph_flows.render_frames ('continuous' or 'discrete', 'auto' limits/bands).
 
 Differences from motion_frame_pipeline.make_frames (which is left unchanged):
 - noise_model ('ring' default, 'global', 'none'): difference images are put in
@@ -58,7 +60,7 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	SDO_instrument=None, SDO_product=None, SDO_dT=None, spacecraft=None,
 	instrument=None, STEREO_imgfolder=None, polar=None, EUVI_fold=None,
 	EUVI_wave=None, EUVI_dT=None, detect_smooth_px=1.5, bright_contrast_snr=False,
-	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None, flow_input='intensity', flow_bin='auto'):
+	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None, flow_input='intensity', flow_bin='auto', colorbar_style='discrete', speed_limits='auto'):
 	"""Prepare and render one event using settings from its launcher (V1 options in the module docstring)."""
 	check_flow_input(flow_input)
 	if flow_bin!='auto' and int(flow_bin)<1:raise ValueError("flow_bin must be 'auto' or a positive integer.")
@@ -179,6 +181,8 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 		arrow_length_pixels=arrow_length_pixels,
 		centroid_arrow_length_pixels=centroid_arrow_length_pixels,
 		speed_bins=speed_bins,
+		colorbar_style=colorbar_style,
+		speed_limits=speed_limits,
 		pfss_needed=pfss_needed,
 		pfss_models=pfss_models,
 		disk_max_minutes=disk_max_minutes,

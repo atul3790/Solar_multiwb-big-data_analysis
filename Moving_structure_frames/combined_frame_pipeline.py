@@ -1,8 +1,10 @@
 """STEREO COR2 + HI1 moving-structure frames: download, combined cache, render.
 
-flow_input 'intensity' (default) or 'base_difference' selects the TV-L1 input (see combined_motion_inputs). A
-reused cache must have been built (or recomputed) for the same flow_input.
-The value is added to parameters.json.
+flow_input 'intensity' (default) or 'base_difference' selects the TV-L1 input
+(see combined_motion_inputs). A reused cache must have been built (or
+recomputed) for the same flow_input. The value is added to parameters.json.
+Render settings (detection, arrows, colorbar_style / speed_limits / speed_bins,
+plot style) pass straight to track_coronagraph_flows.render_frames.
 
 Same steps as motion_frame_pipeline.make_frames for STEREO, with two changes:
 HI1 sums are fetched through Multiwb_datamine.get_STEREO_imgs (route

@@ -38,6 +38,10 @@ from motion_frame_pipeline_V1 import make_frames_V1
 #     coronagraph frame rate.
 # PFSS_dT: Spacing between UTC-anchored PFSS snapshots, in hours. blank uses the saved model
 #     nearest the event midpoint.
+# save_PFSS_maps: PFSS context maps at the sT-eT midpoint, saved in basedir as PFSS_*.png,
+#     on the disk image (nearest cached one first) or a blank Stonyhurst-grid disk with the
+#     AR rectangle. True or 'both', 'full' (full Sun only), 'AR' (AR only), or False (skip,
+#     e.g. on reruns).
 # disk_max_minutes: Maximum separation between a frame and its nearest usable disk image, in
 #     minutes. The frame renders without the disk if none is close enough.
 # base_diff_DT: Quiet reference UTC, at or before sT. The selected exposure is subtracted
@@ -67,7 +71,10 @@ from motion_frame_pipeline_V1 import make_frames_V1
 #     displays the global field without AR highlighting.
 # NOAA_number: Full NOAA active-region number, for example 14100.
 # AR_time: UTC epoch for selecting the NOAA region report; blank uses event start.
-# SRS_file: Optional local NOAA Solar Region Summary file. blank lets the code locate the
+# SRS_file: NOAA Solar Region Summary reports: a folder (the shared NOAA_SRS, used by all
+#     launchers and overlay makers) or one report file. It is read first; missing reports
+#     within AR_lookup_max_age are downloaded into that folder. Blank downloads into the
+#     run's output folder.
 #     report.
 # AR_lookup_max_age: Largest allowed time offset, in hours, between the NOAA report and
 #     AR_time.
@@ -81,6 +88,10 @@ from motion_frame_pipeline_V1 import make_frames_V1
 #     and retraced when the rectangle or spacing changes.
 # trace_longARrooted_loops: 1 keeps closed loops with at least one footpoint in the
 #     rectangle (large AR-rooted loops, tallest first); 0 needs both footpoints inside.
+# AR_loop_reach_deg: Closed AR loops are drawn only if both ends lie within this distance
+#     (degrees on the Sun) of the NOAA centre. Keeps AR-quiet Sun and AR-AR connectors and
+#     drops longer PFSS loops (e.g. to the polar caps). '' = no limit. Selection only:
+#     cached traces are reused.
 # AR_r_seed: Start radius of the AR traces in solar radii (low, for small closed loops).
 #
 # PFSS line display
@@ -88,10 +99,13 @@ from motion_frame_pipeline_V1 import make_frames_V1
 #     reduce clutter.
 # n_global_closed: Number of global closed PFSS traces drawn outside the highlighted set.
 # n_closed: Maximum number of closed traces highlighted for the selected active region.
+# n_AR_open: Maximum number of open AR field lines drawn (AR_openB_col), spread evenly over
+#     those traced. '' draws all.
 # closed_field_color: Matplotlib colour for ordinary global closed PFSS traces.
 # AR_closedB_col: Matplotlib colour for selected closed active-region traces.
 # AR_openB_col: Matplotlib colour for open active-region traces when the AR cache supplies
 #     them.
+# pfss_linewidth: Line width in points for all PFSS lines (global and AR).
 #
 # Image grid and instrument masks
 # npix: Side length of the square analysis grid in pixels. Changes the physical scale of
@@ -146,9 +160,22 @@ from motion_frame_pipeline_V1 import make_frames_V1
 # detect_min_area: Minimum size of a detected component, in analysis pixels.
 # region_span_rsun: Minimum component span along its major axis, in solar radii. Helps
 #     reject small features even when pixel resolution changes.
+# base_region_span_rsun: Minimum projected span (Rsun) of a region in the base-difference
+#     panel; region_span_rsun applies to the running-difference panel. None uses
+#     region_span_rsun.
 # bright_contrast: Minimum median bright-core intensity minus the median in its surrounding
 #     ring, in analysis-image units. Raise it to reject low-contrast bright patches.
+# detect_smooth_px: Gaussian smoothing (grid pixels) of the difference image before
+#     thresholding. 1.5 keeps compact features; about 4 brings out faint diffuse structures
+#     (then lower detect_floor).
+# bright_contrast_snr: 1: bright_contrast is a unitless local SNR, (region 95th percentile -
+#     ring mean) / ring std (about 2 faint, 3 clear). 0: bright_contrast is the median
+#     core-minus-ring difference in image (sigma) units.
 # bright_min_area: Minimum area for bright components, in analysis pixels.
+# region_min_width_rsun: Minimum breadth (minor axis of the region's fitted box), Rsun. '' =
+#     no limit (COR2+HI1 uses 0.8).
+# region_max_aspect: Maximum length/breadth of the region's fitted box; drops thin lines
+#     such as HI1 artefacts. '' = no limit (COR2+HI1 uses 6).
 # weak_bright_factor: Fraction of the normal threshold and contrast used for weak bright
 #     candidates near supported flow. Smaller values admit fainter candidates.
 # flow_support_radius_rsun: Neighbourhood radius in solar radii for considering weak bright
@@ -166,8 +193,37 @@ from motion_frame_pipeline_V1 import make_frames_V1
 #     Bright centroid arrows are solid and dark centroid arrows are dotted.
 # arrow_length_pixels: Fixed drawn contour arrow length in analysis pixels. Direction comes from
 #     flow; speed is encoded by colour.
-# speed_bins: Increasing colour-band boundaries in km/s for projected pattern speed; fixed
-#     across panels and frames.
+# colorbar_style: 'continuous' colour bar over speed_limits, or 'discrete' bands from
+#     speed_bins. One colour axis for all panels and frames.
+# speed_limits: continuous only. 'auto' = 0 to the fastest edge or centroid vector in
+#     sT-eT, rounded up (1221 -> 1500 km/s); or 'vmin,vmax' in km/s.
+# speed_bins: discrete only. 'auto' = bands 0,50,100,200,300,400,500,600,800,1000,1200,
+#     1500,2000,... up to the fastest vector; or increasing km/s boundaries.
+#
+# Plot labels, titles and sizes (points)
+# xlabel: x-axis label of the image panels (Matplotlib mathtext allowed).
+# ylabel: y-axis label of the image panels.
+# xticks: x tick values in solar radii, e.g. [-20,0,20]. None picks round values inside the
+#     field (LASCO C2 -5..5, C3 -20..20).
+# yticks: y tick values in solar radii; None as for xticks.
+# xlabel_size: Font size (points) of the x-axis label.
+# ylabel_size: Font size (points) of the y-axis label.
+# xtick_size: Font size (points) of the x tick labels.
+# ytick_size: Font size (points) of the y tick labels.
+# title: Figure title. None writes the instrument, frame time and pair duration.
+# title_size: Font size (points) of the figure title.
+# subtitle_size: Font size (points) of the two explanatory lines under the title.
+# base_title: Title of the base-difference panel.
+# running_title: Title of the running-difference panel.
+# panel_title_size: Font size (points) of the panel titles.
+# legend: True draws the bright/dark region legend in the first panel.
+# legend_loc: Matplotlib legend location, e.g. 'lower left'.
+# legend_size: Font size (points) of the legend text.
+# colorbar_label: Label of the speed colour bar.
+# colorbar_label_size: Font size (points) of the colour-bar label.
+# colorbar_tick_size: Font size (points) of the colour-bar tick labels.
+# legend_bright_label: Legend text for bright-region contours.
+# legend_dark_label: Legend text for dark-region contours.
 #
 # Light curves
 # user_datacsv: LAT CSV with datetime and flux; optional columns specify flux errors, time
@@ -321,7 +377,9 @@ legend_dark_label='Dark region'
 #### Arrow lengths ####
 arrow_length_pixels=20.
 centroid_arrow_length_pixels=46.
-speed_bins='0,50,100,200,300,400,500,600,800'
+colorbar_style='continuous' # Speed colour bar: 'continuous' or 'discrete'
+speed_limits='auto'      # continuous: 'auto' (0 to the fastest vector in sT-eT, rounded up) or 'vmin,vmax' in km/s, e.g. '0,1000'
+speed_bins='auto'        # discrete: 'auto' (bands 0,50,100,200,...,5000 up to the fastest vector) or km/s boundaries, e.g. '0,50,100,200,300,400,500,600,800'
 show_velocity_vectors=1 # 1: draw edge and centroid velocity arrows and the speed colour bar; 0: contours only (vectors still saved in the CSVs)
 
 #### Light curves ####
@@ -376,7 +434,8 @@ if __name__=='__main__':
 	instrument={1:'COR1',2:'COR2'}.get(instrument_choice)
 	if instrument is None:raise ValueError('Invalid instrument_choice.')
 	final_image_folder=Path(outdir)/(f'pfss_stereo{spacecraft}_{instrument}_motion_EUVI{EUVI_wave}_LC'+(f'_{output_tag}' if output_tag else ''))
-	speed_bins=[float(value) for value in speed_bins.split(',')]
+	speed_bins='auto' if str(speed_bins).strip().lower()=='auto' else [float(value) for value in speed_bins.split(',')]
+	speed_limits='auto' if str(speed_limits).strip().lower()=='auto' else [float(v) for v in speed_limits.split(',')]
 	AR_time=AR_time or sT
 	SRS_file=None if SRS_file=='' else SRS_file
 	n_open=None if n_open=='' else n_open
@@ -405,7 +464,7 @@ if __name__=='__main__':
 		min_displacement=min_displacement, user_datacsv=user_datacsv, goes_folder=goes_folder, goes_download=goes_download,
 		goes_pickle=goes_pickle, goes_csv=goes_csv, bright_border=bright_border, dark_border=dark_border,
 		new_border=new_border, border_width=border_width, arrow_length_pixels=arrow_length_pixels,
-		centroid_arrow_length_pixels=centroid_arrow_length_pixels, speed_bins=speed_bins, plot_style=plot_style,
+		centroid_arrow_length_pixels=centroid_arrow_length_pixels, speed_bins=speed_bins, colorbar_style=colorbar_style, speed_limits=speed_limits, plot_style=plot_style,
 		dpi=dpi, outdir=outdir, final_image_folder=final_image_folder,
 		noise_model=noise_model, ring_step_rsun=ring_step_rsun, ring_strength=ring_strength,
 		reuse_cache=blank(reuse_cache), flow_input=flow_input, flow_bin=flow_bin, diff_panel=diff_panel, display_stretch=display_stretch,

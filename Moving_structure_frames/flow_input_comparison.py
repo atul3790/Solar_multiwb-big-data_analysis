@@ -25,6 +25,13 @@ import numpy as np
 import pandas as pd
 from astropy.time import Time
 
+########### INPUT PARAMETER GUIDE ###########################################
+# basedir: Folder holding motion_cache/ (e.g. <event>/LASCO_LAT_frames); outputs are saved under it.
+# outdir: Folder inside basedir for flow_input_comparison.csv and .png.
+# cache_a: Cache with the reference flow (usually flow_input='intensity'), relative to basedir.
+# cache_b: Cache to compare (usually a copy recomputed with 'base_difference').
+# regions_a: regions.csv of the frames rendered from cache_a; '' skips the region counts.
+# regions_b: regions.csv of the frames rendered from cache_b; '' skips the region counts.
 ########### INPUT ###########################################################
 basedir='/path/to/event_folder/LASCO_LAT_frames'  # Folder holding motion_cache/; outputs are saved under it
 outdir='flow_input_comparison'               # inside basedir
