@@ -1,8 +1,11 @@
 """V1 of motion_frame_pipeline: same detection, flow and plots, plus the COR2+HI1 image processing.
 
 flow_input: 'intensity' (default) or 'base_difference' (TV-L1 on frame - base);
-see motion_inputs. A reused cache must have been built (or recomputed) for the
-same flow_input. The value is added to parameters.json.
+flow_bin: TV-L1 on flow_bin x flow_bin pixel blocks; 'auto' (default) sets it from
+the grid pixel size and frame spacing (motion_inputs.auto_flow_bin: C2 6, C3 1),
+an integer overrides it (1 = grid pixels, the earlier behaviour). See motion_inputs. A reused
+cache must have been built (or recomputed) for the same flow_input and flow_bin.
+Both are added to parameters.json.
 
 Differences from motion_frame_pipeline.make_frames (which is left unchanged):
 - noise_model ('ring' default, 'global', 'none'): difference images are put in
@@ -26,7 +29,7 @@ import sunpy.map
 from datamine_calib_helper import load_map  # truthful WCS for every source
 from astropy.time import Time
 from prepare_sources import fill_coronagraph,fill_disk,prepare_pfss,ensure_hv_coronagraph,ensure_hv_disk
-from motion_inputs import make_motion_cache,check_flow_input
+from motion_inputs import make_motion_cache,check_flow_input,resolve_flow_bin
 from single_noise_model import apply_noise_model
 from goes_cache import resolve_goes_pickle
 from track_coronagraph_flows import render_frames
@@ -55,9 +58,10 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	SDO_instrument=None, SDO_product=None, SDO_dT=None, spacecraft=None,
 	instrument=None, STEREO_imgfolder=None, polar=None, EUVI_fold=None,
 	EUVI_wave=None, EUVI_dT=None, detect_smooth_px=1.5, bright_contrast_snr=False,
-	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None, flow_input='intensity'):
+	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None, flow_input='intensity', flow_bin='auto'):
 	"""Prepare and render one event using settings from its launcher (V1 options in the module docstring)."""
 	check_flow_input(flow_input)
+	if flow_bin!='auto' and int(flow_bin)<1:raise ValueError("flow_bin must be 'auto' or a positive integer.")
 	root=Path(input_folder).expanduser().resolve()
 	def source(path):
 		return root/Path(path).expanduser() if path is not None else None
@@ -98,7 +102,7 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 			motion_cache=Path(reuse_cache).expanduser()
 			if not motion_cache.is_absolute():motion_cache=root/motion_cache
 		if not (motion_cache/'times.json').is_file():raise FileNotFoundError(f'Not a motion cache: {motion_cache}')
-		check_cache_flow_input(motion_cache,flow_input)
+		check_cache_flow_input(motion_cache,flow_input,flow_bin)
 		print(f'Redraw only, reusing {motion_cache}',flush=True)
 		download=False
 	if download:
@@ -113,7 +117,7 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 			max_image_dt,download,helioviewer,prefer_hv)
 		motion_cache=Path(tempfile.mkdtemp(prefix=prefix,dir=cache_root))
 		make_motion_cache(folder,detector,craft,sT,eT,dT,base_diff_DT,reference_lookback,
-			max_image_dt,max_gap_seconds,npix,lo,hi,motion_cache,prefer_helioviewer=prefer_hv,flow_input=flow_input)
+			max_image_dt,max_gap_seconds,npix,lo,hi,motion_cache,prefer_helioviewer=prefer_hv,flow_input=flow_input,flow_bin=flow_bin)
 	apply_noise_model(motion_cache,noise_model,ring_step_rsun,ring_strength)
 	if download:
 		disk_folder=source(EUVI_fold if craft else SDO_fold)
@@ -209,17 +213,22 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 		detect_floor=detect_floor,
 		max_gap_seconds=max_gap_seconds,
 		dpi=dpi)
-	record_flow_input(frames,flow_input)
+	record_flow_input(frames,flow_input,resolve_flow_bin(motion_cache,flow_bin))
 	return motion_cache
 
-def check_cache_flow_input(cache,flow_input):
-	"""Raise ValueError if a reused cache was built for another flow_input (use recompute_flow on a copy)."""
+def check_cache_flow_input(cache,flow_input,flow_bin=1):
+	"""Raise ValueError if a reused cache was built for another flow_input or flow_bin (use recompute_flow on a copy)."""
 	cache=Path(cache);f=cache/('combined_scales.json' if (cache/'combined_scales.json').is_file() else 'noise_scales.json')
-	have=json.loads(f.read_text()).get('flow_input','intensity') if f.is_file() else 'intensity'
-	if have!=flow_input:raise ValueError(f"{cache} has flow_input={have!r}, launcher asks {flow_input!r}. Copy the cache and run recompute_flow(copy,{flow_input!r}), or change flow_input.")
+	info=json.loads(f.read_text()) if f.is_file() else {}
+	if flow_bin=='auto':
+		from motion_inputs import resolve_flow_bin
+		flow_bin=resolve_flow_bin(cache,'auto') if (cache/'coordinates.npz').is_file() and not (cache/'combined_scales.json').is_file() else 1
+	have=(info.get('flow_input','intensity'),info.get('flow_bin',1))
+	if have!=(flow_input,int(flow_bin)):raise ValueError(f"{cache} has flow_input={have[0]!r}, flow_bin={have[1]}; launcher asks {flow_input!r}, {int(flow_bin)}. "
+		f"Copy the cache and run recompute_flow(copy,{flow_input!r},flow_bin={int(flow_bin)}), or change the launcher.")
 
-def record_flow_input(frames,flow_input):
-	"""Add flow_input to the parameters.json that render_frames wrote in frames."""
+def record_flow_input(frames,flow_input,flow_bin=1):
+	"""Add flow_input and flow_bin to the parameters.json that render_frames wrote in frames."""
 	p=Path(frames)/'parameters.json'
-	if p.is_file():d=json.loads(p.read_text());d['flow_input']=flow_input;p.write_text(json.dumps(d,indent=2))
+	if p.is_file():d=json.loads(p.read_text());d.update(flow_input=flow_input,flow_bin=int(flow_bin));p.write_text(json.dumps(d,indent=2))
 

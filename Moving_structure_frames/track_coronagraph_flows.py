@@ -450,8 +450,9 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 			ny,nx=xr.shape
 			for axis,coords,set_ticks in (('x',xr[ny//2],ax.set_xticks),('y',yr[:,nx//2],ax.set_yticks)):
 				step=5 if np.ptp(coords)<50 else 10
-				vals=(np.arange(np.ceil(coords.min()/step),np.floor(coords.max()/step)+1)*step
-					if stereo else np.arange(-20,21,10))
+				if stereo:vals=np.arange(np.ceil(coords.min()/step),np.floor(coords.max()/step)+1)*step
+				else:  # LASCO: symmetric ticks inside the field (C2 -5..5, C3 -20..20)
+					edge=min(-coords.min(),coords.max());vals=np.arange(-np.floor(edge/step),np.floor(edge/step)+1)*step
 				if style(axis+'ticks') is not None:vals=style(axis+'ticks')
 				order=np.argsort(coords)
 				set_ticks(np.interp(vals,coords[order],order),labels=[f'{v:g}' for v in vals])
@@ -462,8 +463,6 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 		cb=fig.colorbar(ScalarMappable(norm=norm,cmap=cmap),ax=list(axs),panchor=(.5,1),shrink=.78,pad=.02,boundaries=speed_bins,ticks=centres,spacing='uniform',extend='max')
 		cb.ax.set_yticklabels([f'{a:g}–{b:g}' for a,b in zip(speed_bins[:-1],speed_bins[1:])])
 		cb.set_label(style('colorbar_label','Speed magnitude |v| (km/s)'),fontsize=style('colorbar_label_size',13));cb.ax.tick_params(labelsize=style('colorbar_tick_size',15),length=0)
-		cb.ax.text(.5,1.06,'Faster',transform=cb.ax.transAxes,ha='center',fontsize=11)
-		cb.ax.text(.5,-.06,'Slower',transform=cb.ax.transAxes,ha='center',fontsize=11)
 		if not show_vectors:cb.ax.set_visible(False)  # keep the panel layout
 		gap=' | gap: arrows and associations withheld' if dt>max_gap_seconds else ''
 		default_title=f'{m.instrument} {m.detector} | {t.strftime("%Y-%m-%d %H:%M:%S")} UT | $\\delta t$ = {dt/60:.1f} min{gap}'

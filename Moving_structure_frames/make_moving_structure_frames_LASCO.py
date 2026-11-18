@@ -122,6 +122,11 @@ from motion_frame_pipeline_V1 import make_frames_V1
 #     launcher) or 'base_difference' (frame - base, same base for both frames of a
 #     pair; removes the static instrument level, radial gradient and F-corona).
 #     A reused cache must have the same flow_input (recompute_flow on a copy).
+# flow_bin: TV-L1 runs on flow_bin x flow_bin pixel blocks, then is scaled back to the
+#     grid; detection and contours keep the full grid. 'auto' sets it from the grid
+#     pixel size and the frame spacing so a 1500 km/s structure moves ~10 flow
+#     pixels per frame (C2 at npix=512: 6; C3: 1; COR2 at 15 min: 3). An integer
+#     overrides it; 1 = grid pixels (the earlier behaviour).
 # reuse_cache: blank builds a new V1 motion cache. 'latest' (newest V1 cache in
 #     outdir/motion_cache) or a cache folder redraws only: no downloads, alignment
 #     or flow; that cache's noise_model is switched (reversibly). Fast for tuning
@@ -269,6 +274,7 @@ ring_step_rsun=1.       # Ring width for the noise profile, Rsun
 ring_strength=.7        # 1 = full local-noise units; 0 = global
 reuse_cache=''          # '' new cache; 'latest' or a V1 cache folder to redraw only
 flow_input='intensity'  # TV-L1 input: 'intensity' or 'base_difference'
+flow_bin='auto'         # TV-L1 pixel blocks: 'auto' (from pixel size and cadence) or an integer, 1 = grid pixels
 diff_panel='both'       # 'both', 'base' or 'running'
 display_stretch='asinh' # 'asinh' or 'linear'
 display_soft=1.         # asinh linear range, sigma
@@ -411,6 +417,6 @@ if __name__=='__main__':
 		centroid_arrow_length_pixels=centroid_arrow_length_pixels, speed_bins=speed_bins, plot_style=plot_style,
 		dpi=dpi, outdir=outdir, final_image_folder=final_image_folder,
 		noise_model=noise_model, ring_step_rsun=ring_step_rsun, ring_strength=ring_strength,
-		reuse_cache=blank(reuse_cache), flow_input=flow_input, diff_panel=diff_panel, display_stretch=display_stretch,
+		reuse_cache=blank(reuse_cache), flow_input=flow_input, flow_bin=flow_bin, diff_panel=diff_panel, display_stretch=display_stretch,
 		display_soft=display_soft, display_limit=display_limit, display_smooth_px=display_smooth_px,
 		show_vectors=bool(show_velocity_vectors))

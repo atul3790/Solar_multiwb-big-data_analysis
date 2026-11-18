@@ -22,7 +22,49 @@ from sunpy.coordinates import frames
 from scipy import ndimage as ndi
 from skimage.registration import optical_flow_tvl1
 
-def flow(a,b,valid):
+FLOW_VREF_KMS=1500.   # speed a structure may reach; flow_bin='auto' keeps its shift per frame near
+FLOW_MAX_SHIFT_PX=10. # this many flow-grid pixels (TV-L1 loses track well beyond ~15)
+
+def auto_flow_bin(px_rsun,dt_seconds,v_kms=FLOW_VREF_KMS,max_shift_px=FLOW_MAX_SHIFT_PX):
+	"""Block size for TV-L1 from the grid pixel size (Rsun) and frame spacing (s).
+
+	A v_kms structure moves v*dt/(695700*px_rsun) grid pixels per frame; the
+	block size is that divided by max_shift_px, rounded, at least 1.
+	LASCO C2 at npix=512 and 12 min: 6; C3 at npix=512: 1; COR2 at npix=512, 15 min: 3.
+	"""
+	return max(1,int(round(v_kms*dt_seconds/(695700.*px_rsun)/max_shift_px)))
+
+def resolve_flow_bin(out,flow_bin):
+	"""Integer flow_bin for cache out: flow_bin itself, or the auto value from its
+	coordinates.npz pixel size and the median frame-pair spacing in times.json."""
+	if flow_bin!='auto':return int(flow_bin)
+	out=Path(out)
+	with np.load(out/'coordinates.npz') as c:px=float(np.median(np.hypot(np.diff(c['x_rsun'],axis=1),np.diff(c['y_rsun'],axis=1))))
+	t=json.loads((out/'times.json').read_text())
+	return auto_flow_bin(px,float(np.median([(Time(v['datetime'])-Time(v['previous_time'])).sec for v in t.values()])))
+
+def _block_mean(a,f):
+	"""Mean over f x f blocks; edges padded by repetition so any shape works."""
+	a=np.pad(a,((0,-a.shape[0]%f),(0,-a.shape[1]%f)),mode='edge')
+	return a.reshape(a.shape[0]//f,f,a.shape[1]//f,f).mean((1,3))
+
+def flow(a,b,valid,flow_bin=1):
+	"""TV-L1 flow from a to b inside valid; returns dx, dy (grid pixels) and quality.
+
+	flow_bin>1: flow on f x f block means of the valid pixels (blocks at least
+	half valid), displacements upsampled bilinearly and scaled back to grid
+	pixels, quality repeated per block and limited to valid. Use it when
+	structures move many grid pixels per frame (e.g. a fast CME in C2 at
+	0.025 Rsun/px), beyond what TV-L1 follows. flow_bin=1 is the direct flow.
+	"""
+	f=int(flow_bin)
+	if f>1:
+		w=_block_mean(valid.astype(float),f);ok=w>=.5
+		A,B=[np.where(ok,_block_mean(np.where(valid,im,0.),f)/np.maximum(w,1e-6),0.) for im in (a,b)]
+		dx,dy,q=flow(A,B,ok)
+		up=lambda d:ndi.zoom(d,f,order=1,mode='nearest',grid_mode=True)[:a.shape[0],:a.shape[1]]*f
+		q=np.repeat(np.repeat(q,f,0),f,1)[:a.shape[0],:a.shape[1]]&valid
+		return up(dx).astype(dx.dtype),up(dy).astype(dy.dtype),q
 	def feature(im):
 		w=ndi.gaussian_filter(valid.astype('float32'),8)
 		bg=ndi.gaussian_filter(np.where(valid,im,0),8)/np.maximum(w,1e-6)
@@ -125,11 +167,13 @@ def family_priority(key,prefer_helioviewer=True):
 	if key[2][-1] in ('msb','bsun','b_sun','meansolarbrightness'):return 0
 	return 2 if prefer_helioviewer else 1
 
-def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,reference_lookback,max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True,flow_input='intensity'):
+def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,reference_lookback,max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True,flow_input='intensity',flow_bin=1):
 	"""Select local exposures, align angular grids, and compute adjacent TV-L1 flow.
 
 	flow_input: 'intensity' (default, as motion_inputs) or 'base_difference'.
-	Saves the cache files in out and flow_input in out/noise_scales.json.
+	flow_bin: TV-L1 on flow_bin x flow_bin blocks (see flow); 1 = grid pixels;
+	'auto' from the grid pixel size and median frame spacing (auto_flow_bin).
+	Saves the cache files in out and flow_input (and flow_bin if >1) in out/noise_scales.json.
 	"""
 	check_flow_input(flow_input)
 	out=Path(out);out.mkdir(parents=True,exist_ok=True)
@@ -139,7 +183,7 @@ def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,ref
 	targets=np.arange(0,(end-start).sec+1e-6,cadence)
 	key,selected,previous,base,_=select_family(folder,detector,spacecraft,start,end,targets,base_time,
 		reference_lookback,max_image_dt,out,prefer_helioviewer)
-	return _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input)
+	return _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input,flow_bin)
 
 def select_family(folder,detector,spacecraft,start,end,targets,base_time,reference_lookback,max_image_dt,out,prefer_helioviewer=True):
 	"""Choose one product family (route + coverage); write coverage_report.csv in out.
@@ -172,7 +216,7 @@ def select_family(folder,detector,spacecraft,start,end,targets,base_time,referen
 	_,key,selected,previous,base,missing,_=best
 	return key,selected,previous,base,missing
 
-def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input='intensity'):
+def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input='intensity',flow_bin=1):
 	"""Align the chosen family on one angular grid and save differences and TV-L1 flow."""
 	print(f'{detector}: using one FITS group ({key[2][0] or key[2][1] or key[2][2] or key[1] or "header provenance"}, BUNIT={key[2][-1]}, {len(selected)} event exposures)',flush=True)
 	ref=load_map(selected[0][1])
@@ -211,27 +255,35 @@ def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_i
 	np.savez_compressed(out/'coordinates.npz',x_rsun=xr,y_rsun=yr)
 	b,bv,_=align(base)
 	prev=previous[-1];a,av,_=align(prev)
+	if flow_bin=='auto':
+		tt=[previous[-1][0]]+[r[0] for r in selected]
+		flow_bin=auto_flow_bin(float(np.median(np.hypot(np.diff(xr,axis=1),np.diff(yr,axis=1)))),float(np.median([(q-p).sec for p,q in zip(tt[:-1],tt[1:])])))
+	flow_bin=int(flow_bin)
+	if flow_bin>1:print(f'TV-L1 on {flow_bin}x{flow_bin} pixel blocks',flush=True)
 	times={}
 	for row in selected:
 		t,p,_=row;im,iv,obs=align(row)
 		dt=(t-prev[0]).sec;valid=iv&av&bv
 		if not valid.any():raise ValueError(f'No valid overlap at {t.isot}. Check image WCS and radial mask.')
-		dx,dy,q=flow(*flow_pair(a,im,b,flow_input),valid) if dt<=max_gap else (np.zeros_like(im),np.zeros_like(im),np.zeros_like(valid))
+		dx,dy,q=flow(*flow_pair(a,im,b,flow_input),valid,flow_bin) if dt<=max_gap else (np.zeros_like(im),np.zeros_like(im),np.zeros_like(valid))
 		tag=t.strftime('structures_%Y%m%d_%H%M%S')
 		np.savez_compressed(out/(tag+'.npz'),valid=valid,dx=dx,dy=dy,quality=q,base_difference=im-b,running_difference=im-a)
 		times[tag]=dict(datetime=t.isot,previous_time=prev[0].isot,source=str(p),base_source=str(base[1]),base_time=base[0].isot,**obs)
 		print(f'{t.isot} | Δt={dt/60:.1f} min',flush=True)
 		prev,a,av=row,im,iv
 	(out/'times.json').write_text(json.dumps(times,indent=2))
-	_set_state(out,flow_input)
+	_set_state(out,flow_input,flow_bin)
 	return out
 
 STATE='noise_scales.json'
 
-def _set_state(out,flow_input):
-	"""Record flow_input in out/noise_scales.json, keeping its other keys."""
+def _set_state(out,flow_input,flow_bin=1):
+	"""Record flow_input (and flow_bin when >1) in out/noise_scales.json, keeping its other keys."""
 	f=Path(out)/STATE;info=json.loads(f.read_text()) if f.is_file() else dict(noise_model='none')
-	info['flow_input']=flow_input;f.write_text(json.dumps(info,indent=2))
+	info['flow_input']=flow_input
+	if int(flow_bin)>1:info['flow_bin']=int(flow_bin)
+	else:info.pop('flow_bin',None)
+	f.write_text(json.dumps(info,indent=2))
 
 def find_predecessor(source,previous_time,detector):
 	"""Path of the exposure at previous_time in the same folder and product family as source."""
@@ -257,8 +309,10 @@ def is_gap_frame(d):
 	"""True when a frame's flow was skipped (pair longer than max_gap): dx, dy all zero, no quality."""
 	return not d['quality'].any() and not d['dx'].any() and not d['dy'].any()
 
-def recompute_flow(out,flow_input,force=False):
-	"""Rewrite dx, dy, quality of an existing single-instrument cache for flow_input.
+def recompute_flow(out,flow_input,force=False,flow_bin=1):
+	"""Rewrite dx, dy, quality of an existing single-instrument cache for flow_input and flow_bin.
+
+	flow_bin: integer or 'auto' (see resolve_flow_bin).
 
 	Images are reloaded from the paths in times.json (source, base_source; the
 	first frame's predecessor is found beside its source), so no download is
@@ -269,8 +323,9 @@ def recompute_flow(out,flow_input,force=False):
 	"""
 	check_flow_input(flow_input);out=Path(out)
 	f=out/STATE;info=json.loads(f.read_text()) if f.is_file() else {}
-	if info.get('flow_input','intensity')==flow_input and not force:
-		print(f'Flow input already {flow_input}: {out}',flush=True);return out
+	flow_bin=resolve_flow_bin(out,flow_bin)
+	if info.get('flow_input','intensity')==flow_input and info.get('flow_bin',1)==flow_bin and not force:
+		print(f'Flow input already {flow_input} (flow_bin {flow_bin}): {out}',flush=True);return out
 	times=json.loads((out/'times.json').read_text())
 	ref,coords=grid_coords(out);detector=str(ref.meta.get('detector','')).upper()
 	image=__import__('functools').lru_cache(maxsize=3)(lambda p:align_image(p,coords))
@@ -281,9 +336,9 @@ def recompute_flow(out,flow_input,force=False):
 		if prev_src is None:prev_src=str(find_predecessor(it['source'],it['previous_time'],detector))
 		if not is_gap_frame(d):
 			b=image(it['base_source']);valid=d['valid']&np.isfinite(b)
-			d['dx'],d['dy'],d['quality']=flow(*flow_pair(*map(np.nan_to_num,(image(prev_src),image(it['source']),b)),flow_input),valid)
+			d['dx'],d['dy'],d['quality']=flow(*flow_pair(*map(np.nan_to_num,(image(prev_src),image(it['source']),b)),flow_input),valid,flow_bin)
 			np.savez_compressed(p,**d)
-		print(f'{it["datetime"]} | flow from {flow_input}',flush=True)
+		print(f'{it["datetime"]} | flow from {flow_input}, flow_bin {int(flow_bin)}',flush=True)
 		prev_src=it['source']
-	_set_state(out,flow_input)
+	_set_state(out,flow_input,flow_bin)
 	return out
