@@ -17,6 +17,9 @@ The grid is the 512 x 512 PNG grid; the observer is SOHO (0.99 AU, Earth
 longitude). Values are display units, so speeds are approximate and region
 detection relies on the noise model ('ring' or 'global').
 
+Downloads: CDAW drops some requests, so each file is retried and then fetched with
+curl; saved files are reused and a rerun fills the remaining gaps.
+
 C2 only: CDAW has no C3 intensity composite. recompute_flow is not supported
 for these caches (sources are PNGs).
 

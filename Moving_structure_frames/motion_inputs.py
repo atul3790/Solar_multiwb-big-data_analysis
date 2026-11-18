@@ -11,6 +11,13 @@ C2 at npix=512 -> 6, C3 -> 1). flow_bin=1 is the direct flow.
 Both choices are recorded in the cache's noise_scales.json (flow_bin when >1).
 Differences, masks and the noise model are unchanged.
 
+Source choice (select_family): one product family per cache, never mixed. Families
+are tried in priority order, Level-1 -> Helioviewer -> Level-0.5
+(prefer_helioviewer=True) or Level-1 -> Level-0.5 -> Helioviewer (False); the first
+usable one (event frames, predecessor and base) covering more than half of the
+cadence slots wins, else the one covering most slots. use_helioviewer=False drops
+Helioviewer entirely. The table is printed and saved as coverage_report.csv.
+
 Importable: flow, make_motion_cache, select_family, recompute_flow,
 auto_flow_bin, resolve_flow_bin, check_flow_input, spacecraft_id, inventory,
 product_groups.

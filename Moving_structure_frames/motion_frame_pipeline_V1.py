@@ -7,7 +7,10 @@ an integer overrides it (1 = grid pixels, the earlier behaviour). See motion_inp
 cache must have been built (or recomputed) for the same flow_input and flow_bin.
 Both are added to parameters.json.
 use_CDAW_pngs (LASCO C2): cache from the CDAW running-difference and intensity
-PNGs instead of FITS (cdaw_inputs; files in <LASCO_imgfolder>/CDAW).
+PNGs instead of FITS (cdaw_inputs; files in <LASCO_imgfolder>/CDAW); skips
+prepare_sources.fill_coronagraph and names the cache V1_LASCO_C2_CDAW_*.
+helioviewer: 0 never fetches, converts or uses Helioviewer images
+(motion_inputs.select_family with use_helioviewer=False).
 colorbar_style / speed_limits / speed_bins: speed colour bar, passed to
 track_coronagraph_flows.render_frames ('continuous' or 'discrete', 'auto' limits/bands).
 

@@ -5,6 +5,10 @@ Detects bright and dark structures in quiet-base and running difference images
 with TV-L1 optical flow, and draws them with projected PFSS field lines, an
 optional disk image and the LAT/GOES light curves. Saves PNG frames, an MP4,
 edge/centroid vector CSVs and a reusable motion cache (reuse_cache redraws only).
+Image source: one product family per run (never mixed). need_LASCO_calib=True prefers
+Level-1, False prefers Level-0.5; Helioviewer is the fallback only with helioviewer=1
+(rule in the guide below). use_CDAW_pngs=1 (C2 only) builds the cache from the CDAW
+running-difference and intensity PNGs instead of FITS (cdaw_inputs.py).
 Edit only the INPUT block. Uses motion_frame_pipeline_V1.make_frames_V1.
 """
 from pathlib import Path

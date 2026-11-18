@@ -5,6 +5,9 @@ Detects bright and dark structures in quiet-base and running difference images
 with TV-L1 optical flow, and draws them with projected PFSS field lines, an
 optional disk image and the LAT/GOES light curves. Saves PNG frames, an MP4,
 edge/centroid vector CSVs and a reusable motion cache (reuse_cache redraws only).
+Image source: one product family per run (never mixed), the first of Level-1,
+Helioviewer, Level-0.5 covering more than half of the slots; helioviewer=0 excludes
+Helioviewer (rule in the guide below).
 Edit only the INPUT block. Uses motion_frame_pipeline_V1.make_frames_V1.
 """
 from pathlib import Path

@@ -1,4 +1,14 @@
-"""Fill gaps in the existing frame-maker databases and prepare PFSS epochs."""
+"""Fill gaps in the existing frame-maker databases and prepare PFSS epochs.
+
+fill_coronagraph / fill_disk download missing cadence bins through Solar_data_mining
+(Level-1 -> Helioviewer -> Level-0.5). ensure_hv_coronagraph / ensure_hv_disk convert
+Helioviewer JP2s to FITS where science FITS are missing; with helioviewer=0 nothing
+is converted and only science FITS are used. prepare_pfss builds UTC-anchored PFSS
+snapshots. Not used for use_CDAW_pngs runs (cdaw_inputs downloads its own PNGs).
+
+Importable: fill_coronagraph, fill_disk, ensure_hv_coronagraph, ensure_hv_disk,
+prepare_pfss, stereo_root.
+"""
 from pathlib import Path
 import inspect
 import json

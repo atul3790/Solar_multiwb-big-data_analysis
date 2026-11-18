@@ -27,7 +27,7 @@ Image download and preparation come from the companion repository **[Solar_data_
 
 ```bash
 git clone https://github.com/atul3790/Solar_data_mining.git
-git clone -b moving-structure-frames https://github.com/atul3790/Solar_multiwb-big-data_analysis.git
+git clone https://github.com/atul3790/Solar_multiwb-big-data_analysis.git
 export PYTHONPATH=$PWD/Solar_data_mining:$PWD/Solar_multiwb-big-data_analysis/Moving_structure_frames:$PYTHONPATH
 python -m pip install -r Solar_multiwb-big-data_analysis/Moving_structure_frames/requirements.txt
 ```
@@ -48,6 +48,7 @@ Each event study uses one `basedir`. Every relative path in the launchers' INPUT
   PFSS/<YYYYMMDD_HHMMSS>/        PFSS snapshots at UTC multiples of PFSS_dT (00, 06, ... UT)
   solar_data/gong/               GONG synoptic maps used to build PFSS
   LASCO/C3/  SDO/HMI/...         image databases (raw/, maps/, maps_HV/)
+  LASCO/C2/CDAW/                 CDAW C2 PNGs (use_CDAW_pngs=1 only)
   STEREO/STEREO_A/{COR2,HI1,EUVI/195}/
   PSP_WISPR/
   LASCO_LAT_frames/              frames, MP4s, CSVs and motion_cache/ for LASCO runs
@@ -63,7 +64,7 @@ Edit only the INPUT block of a script, then run it with `python script.py` or `%
 
 | Script | What it makes |
 |---|---|
-| `make_moving_structure_frames_LASCO.py` | LASCO C2 or C3 flow frames: base and running difference panels, bright/dark contours, edge and centroid drift arrows, PFSS, an SDO disk image (HMI or AIA) and LAT/GOES curves |
+| `make_moving_structure_frames_LASCO.py` | LASCO C2 or C3 flow frames: base and running difference panels, bright/dark contours, edge and centroid drift arrows, PFSS, an SDO disk image (HMI or AIA) and LAT/GOES curves. C2 can also run on the CDAW PNGs (`use_CDAW_pngs=1`). |
 | `make_moving_structure_frames_STEREO.py` | Same for STEREO COR1 or COR2, with an EUVI disk image and PFSS projected from STEREO's viewpoint |
 | `make_moving_structure_frames_STEREO_COR2_HI1.py` | COR2 and HI1 joined on one helioprojective grid from STEREO-A, following structures out to about 90 R☉. Draws one panel (`diff_panel='base'` or `'running'`). |
 | `flow_input_comparison.py` | Compares the flow of two caches built with different `flow_input` (quality fraction, speed, angle difference, time since base); CSV and PNG |
@@ -78,8 +79,10 @@ launcher INPUT
   └─ motion_frame_pipeline_V1.make_frames_V1      (LASCO / STEREO launchers)
      combined_frame_pipeline.make_combined_frames (COR2 + HI1 launcher)
        1. prepare_sources       fill missing image bins: Level-1 → Helioviewer → Level-0.5
+                                (Helioviewer skipped with helioviewer=0)
        2. motion_inputs         choose one product family, align on one grid,
           combined_motion_inputs   base/running differences, TV-L1 flow → motion_cache/
+          cdaw_inputs           use_CDAW_pngs=1 (C2): replaces steps 1–2 with the CDAW PNGs
        3. single_noise_model    differences → noise-sigma units (ring noise profile)
           combined_motion_inputs   (same for COR2 + HI1; HI1 flow from star-cleaned images)
        4. prepare_sources       EUVI/SDO disk images and PFSS snapshots
@@ -169,7 +172,7 @@ Each flow run writes to `<outdir>/<auto-named folder><output_tag>/`:
 - `regions.csv`, `pfss_sources.csv`, `disk_sources.csv`, `parameters.json` (every render setting, plus `flow_input`, `flow_bin`, `colorbar_style`, `speed_limits_kms` / `speed_bins_kms` and `fastest_vector_kms`)
 - `structures_<time>_masks.npz`: detection masks
 
-The motion cache goes in `<outdir>/motion_cache/<name>/`. It holds the aligned differences, flow, `times.json` and the noise-model and flow state (`noise_scales.json` or `combined_scales.json`: `flow_input`, `flow_bin`), and can be reused for redraws. Overlay makers write their frames and MP4 to `final_image_folder`, with intermediate images and logs in `outdir`.
+The motion cache goes in `<outdir>/motion_cache/<name>/`. It holds the aligned differences, flow, `times.json` and the noise-model and flow state (`noise_scales.json` or `combined_scales.json`: `flow_input`, `flow_bin`), and can be reused for redraws. Caches are named `V1_<LASCO|craft>_<detector>_*`; CDAW caches are `V1_LASCO_C2_CDAW_*` (state `source='CDAW PNG'`), and `reuse_cache='latest'` picks a CDAW cache only when `use_CDAW_pngs=1`. Overlay makers write their frames and MP4 to `final_image_folder`, with intermediate images and logs in `outdir`.
 
 ## Example
 
@@ -197,6 +200,8 @@ python make_moving_structure_frames_STEREO_COR2_HI1.py
 - **STEREO HI1** has no Helioviewer source. Level-1 files are used when present locally (from UKSSDC, which needs a login); otherwise SSC Level-0.5 sums are downloaded.
 - **LASCO C3 spoke:** `spoke_pa` masks the C3 support pylon. Check its position angle for each new date; the launcher's comment says to set `spoke_halfwidth=0` for C2.
 - **Fast CMEs in LASCO C2:** at `npix=512` (0.025 R☉ per pixel) a 1500 km/s front moves ~60 pixels per 12-min frame. Keep `flow_bin='auto'` (6 for C2) and use `flow_input='base_difference'`: on 2025-05-31 this raised the C2 front speeds from ~40 to ~900 km/s (90th percentile), while intensity input stayed near 100–260 km/s because the steep radial gradient dominates the flow input.
+- **Which LASCO source a run used** is printed as a coverage table and saved as `coverage_report.csv` in the cache. If a window shows weak, posterised differences, check whether Helioviewer was chosen (8-bit, bright parts clipped); `helioviewer=0` forces science FITS, at the cost of frames where they are missing.
+- **CDAW PNGs (`use_CDAW_pngs=1`)** are C2 only: CDAW has no C3 intensity composite, and `recompute_flow` does not apply to these caches. CDAW's server drops some requests; downloads are retried (then `curl`), files already saved are reused, and a rerun fills remaining gaps. Speeds are approximate (display units).
 - **COR2 + HI1 has no `flow_bin`**: its flow runs on the grid pixels (~0.1 R☉ at `npix=1024`).
 - **PSP/WISPR** data are public only after a delay. The WISPR maker stops with "No usable WISPR images" until they are released.
 - **Light curves:** the LAT light curve is supplied by the user (`user_datacsv`). GOES XRS-B is fetched automatically.

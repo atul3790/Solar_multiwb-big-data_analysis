@@ -7,6 +7,8 @@ difference panel is drawn (diff_panel='base' or 'running').
 
 HI1 comes from Multiwb_datamine.get_STEREO_imgs(instruments=['HI1']):
 Level-1 (local UKSSDC files) -> Helioviewer (no HI source) -> Level-0.5 (SSC).
+COR2 uses one product family, the first of Level-1, Helioviewer, Level-0.5 covering
+more than half of the slots; helioviewer=0 excludes Helioviewer.
 Each instrument is differenced against itself and divided by its own noise
 scale, so detect_floor and bright_contrast below are in noise (sigma) units.
 """
