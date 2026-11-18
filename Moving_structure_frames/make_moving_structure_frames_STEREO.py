@@ -28,8 +28,10 @@ from motion_frame_pipeline_V1 import make_frames_V1
 # EUVI_wave: EUVI channel in angstroms: 171, 195, 284 or 304.
 # download: 1 allows filling missing image bins and building missing scheduled PFSS
 #     snapshots. GOES retrieval is controlled separately.
-# helioviewer: Allow the downloader's Helioviewer fallback where supported. Motion analysis
-#     still requires usable intensity FITS with WCS.
+# helioviewer: 1 allows Helioviewer COR1/COR2 images. Order: Level-1, then Helioviewer, then
+#     Level-0.5; the first that covers more than half of the cadence slots is used (sources
+#     are never mixed). 0 never fetches, converts or uses Helioviewer images, even if they
+#     are already on disk.
 #
 # Sampling and frame pairing
 # dT: Target coronagraph sampling in seconds. Actual exposure times are retained; 600

@@ -164,7 +164,7 @@ def write_coverage_report(out,report,missing_times):
 		w.writerow(['family','kind','files','covered_slots','has_predecessor','has_base','usable','chosen'])
 		w.writerows(report)
 		w.writerow([]);w.writerow(['uncovered_slots_in_chosen_family']+list(missing_times))
-	for r in report:print('  coverage:',r[1],r[3],'slots',('<- USED' if r[-1] else ''),'|',r[0],flush=True)
+	for r in report:print('  coverage:',r[1],r[3],'slots',('<- USED' if r[-1]=='USED' else r[-1]),'|',r[0],flush=True)
 
 def family_priority(key,prefer_helioviewer=True):
 	"""0 Level-1 (MSB), then Helioviewer and Level-0.5 in the order the route asks for."""
@@ -172,10 +172,11 @@ def family_priority(key,prefer_helioviewer=True):
 	if key[2][-1] in ('msb','bsun','b_sun','meansolarbrightness'):return 0
 	return 2 if prefer_helioviewer else 1
 
-def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,reference_lookback,max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True,flow_input='intensity',flow_bin=1):
+def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,reference_lookback,max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True,flow_input='intensity',flow_bin=1,use_helioviewer=True):
 	"""Select local exposures, align angular grids, and compute adjacent TV-L1 flow.
 
 	flow_input: 'intensity' (default, as motion_inputs) or 'base_difference'.
+	use_helioviewer: False never uses Helioviewer FITS (see select_family).
 	flow_bin: TV-L1 on flow_bin x flow_bin blocks (see flow); 1 = grid pixels;
 	'auto' from the grid pixel size and median frame spacing (auto_flow_bin).
 	Saves the cache files in out and flow_input (and flow_bin if >1) in out/noise_scales.json.
@@ -187,11 +188,18 @@ def make_motion_cache(folder,detector,spacecraft,start,end,cadence,base_time,ref
 		raise ValueError('Check interval, cadence, base-reference time and npix.')
 	targets=np.arange(0,(end-start).sec+1e-6,cadence)
 	key,selected,previous,base,_=select_family(folder,detector,spacecraft,start,end,targets,base_time,
-		reference_lookback,max_image_dt,out,prefer_helioviewer)
+		reference_lookback,max_image_dt,out,prefer_helioviewer,use_helioviewer)
 	return _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input,flow_bin)
 
-def select_family(folder,detector,spacecraft,start,end,targets,base_time,reference_lookback,max_image_dt,out,prefer_helioviewer=True):
+def select_family(folder,detector,spacecraft,start,end,targets,base_time,reference_lookback,max_image_dt,out,prefer_helioviewer=True,use_helioviewer=True):
 	"""Choose one product family (route + coverage); write coverage_report.csv in out.
+
+	Order: Level-1, then Helioviewer and Level-0.5 (Helioviewer first when
+	prefer_helioviewer, i.e. need_LASCO_calib=True and STEREO; Level-0.5 first
+	when need_LASCO_calib=False). use_helioviewer=False drops Helioviewer.
+	The first usable family (event frames, a predecessor and a base) covering
+	more than half of the cadence slots is used; if none does, the usable
+	family covering most slots (ties: the order above). Families are never mixed.
 
 	Returns (key, selected rows, predecessor rows, base row, uncovered target indices).
 	"""
@@ -205,13 +213,10 @@ def select_family(folder,detector,spacecraft,start,end,targets,base_time,referen
 		kind=('Level-1','Helioviewer','Level-0.5')[[0,1,2][family_priority(key,True)]]
 		report.append([family_label(key,group),kind,len(group),
 			f'{len(targets)-len(missing)}/{len(targets)}',bool(previous),base is not None,ok,''])
+		if key[0] and not use_helioviewer:report[-1][-2]=False;report[-1][-1]='excluded (helioviewer=0)';continue
 		if not ok:continue
-		# Route Level-1 -> Helioviewer -> Level-0.5 (Level-0.5 before Helioviewer when
-		# prefer_helioviewer=False): the first family covering every slot wins;
-		# otherwise the one covering most slots, ties by that priority.
-		covered=len(targets)-len(missing)
-		score=(covered==len(targets),-family_priority(key,prefer_helioviewer) if covered==len(targets) else covered,
-			-family_priority(key,prefer_helioviewer))
+		covered=len(targets)-len(missing);rank=family_priority(key,prefer_helioviewer)
+		score=(covered>len(targets)/2,-rank if covered>len(targets)/2 else covered,-rank)
 		if best is None or score>best[0]:best=(score,key,selected,previous,base,missing,len(report)-1)
 	if best is None:
 		write_coverage_report(out,report,[])
@@ -328,6 +333,7 @@ def recompute_flow(out,flow_input,force=False,flow_bin=1):
 	"""
 	check_flow_input(flow_input);out=Path(out)
 	f=out/STATE;info=json.loads(f.read_text()) if f.is_file() else {}
+	if info.get('source')=='CDAW PNG':raise ValueError(f'{out} was built from CDAW PNGs; rebuild it with the launcher instead of recompute_flow.')
 	flow_bin=resolve_flow_bin(out,flow_bin)
 	if info.get('flow_input','intensity')==flow_input and info.get('flow_bin',1)==flow_bin and not force:
 		print(f'Flow input already {flow_input} (flow_bin {flow_bin}): {out}',flush=True);return out

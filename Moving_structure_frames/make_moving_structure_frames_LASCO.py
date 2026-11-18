@@ -21,16 +21,19 @@ from motion_frame_pipeline_V1 import make_frames_V1
 # LASCO_choice: 1 = C2; 2 = C3.
 # LASCO_imgfolder: Blank uses LASCO/C2 or LASCO/C3. Otherwise enter the folder searched for intensity FITS and used for
 #     missing-image retrieval.
-# need_LASCO_calib: Request the preferred calibration retrieval route for missing LASCO
-#     files. Does not recalibrate files already selected from disk.
+# need_LASCO_calib: Source preference. True: Level-1 if it covers more than half of the
+#     cadence slots, else Helioviewer (if helioviewer=1), else Level-0.5. False: Level-0.5
+#     first, then Helioviewer (if helioviewer=1). Sources are never mixed; if none covers
+#     more than half, the one covering most slots is used. Files are not recalibrated.
 # SDO_fold: Root of the SDO image database. Set blank to omit the solar disk overlay.
 # SDO_instrument_choice: 1 = HMI; 2 = AIA.
 # SDO_product: For HMI, choose magnetogram, continuum or dopplergram; for AIA, specify a
 #     wavelength in angstroms, e.g. 193.
 # download: 1 allows filling missing image bins and building missing scheduled PFSS
 #     snapshots. GOES retrieval is controlled separately.
-# helioviewer: Allow the downloader's Helioviewer fallback where supported. Motion analysis
-#     still requires usable intensity FITS with WCS.
+# helioviewer: 1 allows Helioviewer images: fetched as a fallback and used when the
+#     preferred science level covers no more than half of the cadence slots. 0 never
+#     fetches, converts or uses them, even if they are already on disk.
 #
 # Sampling and frame pairing
 # dT: Target coronagraph sampling in seconds. Actual exposure times are retained; 600
@@ -141,6 +144,12 @@ from motion_frame_pipeline_V1 import make_frames_V1
 #     pixel size and the frame spacing so a 1500 km/s structure moves ~10 flow
 #     pixels per frame (C2 at npix=512: 6; C3: 1; COR2 at 15 min: 3). An integer
 #     overrides it; 1 = grid pixels (the earlier behaviour).
+# use_CDAW_pngs: C2 only. 1 builds the cache from the CDAW PNGs
+#     (cdaw.gsfc.nasa.gov/images/soho/lasco/YYYY/MM/DD/), downloaded into
+#     <LASCO_imgfolder>/CDAW, instead of FITS: regions from CDAW's running differences
+#     (*_lasc2rdf.png), flow and base differences from its intensity composites
+#     (*_lasc2aia193.png). Display units and ~11 grey levels, so speeds are approximate;
+#     npix and the FITS route settings are ignored. 0 uses the FITS route.
 # reuse_cache: blank builds a new V1 motion cache. 'latest' (newest V1 cache in
 #     outdir/motion_cache) or a cache folder redraws only: no downloads, alignment
 #     or flow; that cache's noise_model is switched (reversibly). Fast for tuning
@@ -331,6 +340,7 @@ ring_strength=.7        # 1 = full local-noise units; 0 = global
 reuse_cache=''          # '' new cache; 'latest' or a V1 cache folder to redraw only
 flow_input='intensity'  # TV-L1 input: 'intensity' or 'base_difference'
 flow_bin='auto'         # TV-L1 pixel blocks: 'auto' (from pixel size and cadence) or an integer, 1 = grid pixels
+use_CDAW_pngs=0         # 1: C2 from the CDAW running-difference + intensity PNGs instead of FITS (C2 only)
 diff_panel='both'       # 'both', 'base' or 'running'
 display_stretch='asinh' # 'asinh' or 'linear'
 display_soft=1.         # asinh linear range, sigma
@@ -476,6 +486,6 @@ if __name__=='__main__':
 		centroid_arrow_length_pixels=centroid_arrow_length_pixels, speed_bins=speed_bins, colorbar_style=colorbar_style, speed_limits=speed_limits, plot_style=plot_style,
 		dpi=dpi, outdir=outdir, final_image_folder=final_image_folder,
 		noise_model=noise_model, ring_step_rsun=ring_step_rsun, ring_strength=ring_strength,
-		reuse_cache=blank(reuse_cache), flow_input=flow_input, flow_bin=flow_bin, diff_panel=diff_panel, display_stretch=display_stretch,
+		reuse_cache=blank(reuse_cache), flow_input=flow_input, flow_bin=flow_bin, use_CDAW_pngs=bool(use_CDAW_pngs), diff_panel=diff_panel, display_stretch=display_stretch,
 		display_soft=display_soft, display_limit=display_limit, display_smooth_px=display_smooth_px,
 		show_vectors=bool(show_velocity_vectors))

@@ -128,9 +128,10 @@ def robust_sigma(values):
 def make_combined_cache(cor2_folder,hi_folder,spacecraft,start,end,cadence,base_time,reference_lookback,
 	max_image_dt,max_gap,npix,r_inner,r_outer,out,prefer_helioviewer=True,hi_detector='HI1',
 	hi_max_image_dt=1500.,hi_lookback=3600.,hi_max_gap=5400.,hi_star_filter_px=5,hi_edge_px=8,
-	seam_rsun=None,spoke_pa=0.,spoke_halfwidth=0.,spoke_arrow_buffer_deg=0.,noise_model='ring',ring_step_rsun=3.,ring_strength=.7,hi_flow_clean=True,flow_input='intensity'):
+	seam_rsun=None,spoke_pa=0.,spoke_halfwidth=0.,spoke_arrow_buffer_deg=0.,noise_model='ring',ring_step_rsun=3.,ring_strength=.7,hi_flow_clean=True,flow_input='intensity',use_helioviewer=True):
 	"""Build the COR2+HI1 cache in out; return out.
 
+	use_helioviewer: False never uses Helioviewer COR2 FITS (motion_inputs.select_family).
 	flow_input: 'intensity' (default) or 'base_difference' (TV-L1 on frame - base
 	in each zone; HI1 pixels lose quality when there is no HI1 base sum).
 
@@ -152,7 +153,7 @@ def make_combined_cache(cor2_folder,hi_folder,spacecraft,start,end,cadence,base_
 	targets=np.arange(0,(end-start).sec+1e-6,cadence)
 	#### COR2: one family, as in the single-instrument pipeline ####
 	key,selected,previous,base,_=select_family(cor2_folder,'COR2',spacecraft,start,end,targets,base_time,
-		reference_lookback,max_image_dt,out,prefer_helioviewer)
+		reference_lookback,max_image_dt,out,prefer_helioviewer,use_helioviewer)
 	(out/'coverage_report.csv').replace(out/'coverage_report_COR2.csv')
 	preview=lambda m:bool(m.meta.get('ov_hv')) or 'helioviewer' in str(m.meta.get('ov_src','')).lower()
 	print(f'COR2: {len(selected)} event exposures ({"Helioviewer" if key[0] else key[2][-1]})',flush=True)

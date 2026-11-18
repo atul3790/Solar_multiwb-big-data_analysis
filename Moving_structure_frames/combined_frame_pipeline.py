@@ -104,7 +104,7 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 			hi_max_image_dt=hi_max_image_dt,hi_lookback=hi_lookback,hi_max_gap=hi_max_gap,
 			hi_star_filter_px=hi_star_filter_px,hi_edge_px=hi_edge_px,seam_rsun=seam_rsun,
 			spoke_pa=spoke_pa,spoke_halfwidth=spoke_halfwidth,spoke_arrow_buffer_deg=spoke_arrow_buffer_deg,
-			noise_model=noise_model,ring_step_rsun=ring_step_rsun,ring_strength=ring_strength,hi_flow_clean=hi_flow_clean,flow_input=flow_input)
+			noise_model=noise_model,ring_step_rsun=ring_step_rsun,ring_strength=ring_strength,hi_flow_clean=hi_flow_clean,flow_input=flow_input,use_helioviewer=bool(helioviewer))
 	#### EUVI disk and PFSS, as before ####
 	disk_folder=source(EUVI_fold)
 	if disk_folder is not None:
