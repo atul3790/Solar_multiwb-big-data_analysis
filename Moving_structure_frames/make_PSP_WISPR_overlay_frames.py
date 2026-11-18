@@ -42,6 +42,65 @@ import sunpy.timeseries as ts
 import solar_overlay as so
 import solar_overlay_helper as oh
 
+#################### INPUT PARAMETER GUIDE ####################
+# Edit only the INPUT block below. Paths are relative to basedir.
+#
+# basedir: Event folder. Every relative path below is inside it; the script can be run from
+#     anywhere.
+# sT: Start of the UTC event window, YYYY-MM-DDThh:mm:ss.
+# eT: End of the UTC event window, later than sT.
+# dT: WISPR output cadence, seconds (one frame per bin).
+# detector: WISPR telescope: 'INNER' or 'OUTER'.
+# img_folder: WISPR cache and download root.
+# outdir: Output root for intermediate products and caches (relative to basedir).
+# final_image_folder: Folder for the finished overlay + light-curve PNG frames (relative to
+#     basedir).
+# download: True downloads missing WISPR files through Fido/VSO.
+# need_pfss: True loads (or builds) PFSS and draws the field lines.
+# pfss_dir: Folder of saved PFSS snapshots (shared by all launchers and overlay makers);
+#     missing snapshots are built here when downloads are allowed.
+#
+# PFSS parameters
+# PFSS_dT: Spacing of the UTC-anchored PFSS snapshots, in HOURS. Each frame uses the nearest
+#     snapshot.
+# save_PFSS_maps: PFSS context maps at the sT-eT midpoint, saved in basedir as PFSS_*.png,
+#     on the disk image (nearest cached one first) or a blank Stonyhurst-grid disk with the
+#     AR rectangle. True or 'both', 'full' (full Sun only), 'AR' (AR only), or False (skip,
+#     e.g. on reruns).
+# rss: PFSS source-surface radius (Rsun) for new snapshots.
+# nrho: Number of radial cells in a new PFSS model.
+# r_seed: Radius (Rsun) where the global PFSS traces are seeded.
+# n_lon: Longitude samples in the global PFSS seed grid.
+# n_lat: Latitude samples in the global PFSS seed grid.
+#
+# Shell plotting
+# shell_r: Radius (Rsun) of the spherical-shell wireframe drawn in the WISPR view.
+# shell_grid_dlon: Degrees between shell meridians.
+# shell_grid_dlat: Degrees between shell parallels.
+# shell_color: Shell wireframe colour.
+# shell_alpha: Shell wireframe opacity (0-1).
+# shell_lw: Shell wireframe line width (points).
+# observer_location: None uses the WISPR header, else JPL Horizons; a manual longitude such
+#     as 'W37' is used together with observer_latitude and observer_distance_au.
+# observer_latitude: Observer latitude (deg); None keeps the header or Horizons value.
+# observer_distance_au: Observer distance (AU); None keeps the header or Horizons value.
+# nproc: Number of parallel rendering workers; 1 runs serially. Lower it if memory is short.
+# npix: Image resampled to npix x npix before drawing (display resolution only).
+# dpi: Output PNG dots per inch.
+# N_closed: Maximum closed PFSS loops drawn.
+# closed_color: Colour of closed PFSS lines.
+# open_positive_color: Colour of positive-polarity open lines.
+# open_negative_color: Colour of negative-polarity open lines.
+#
+# Light curves
+# need_GOES: True adds the GOES and LAT lower panel.
+# flux_csv: Fermi-LAT CSV inside basedir, same format as the LASCO/STEREO overlay makers.
+# goes_pickle: Optional cached GOES pickle; None uses goes_folder or downloads.
+# goes_folder: GOES cache folder: a pickle spanning sT-eT is reused; downloads are saved
+#     here.
+# flux_label: Legend label of the LAT curve.
+# flux_ylabel: y-axis label of the LAT curve.
+
 #################### INPUT #################################################
 basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
 sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC

@@ -1,5 +1,16 @@
 """V1 of motion_frame_pipeline: same detection, flow and plots, plus the COR2+HI1 image processing.
 
+flow_input: 'intensity' (default) or 'base_difference' (TV-L1 on frame - base);
+flow_bin: TV-L1 on flow_bin x flow_bin pixel blocks; 'auto' (default) sets it from
+the grid pixel size and frame spacing (motion_inputs.auto_flow_bin: C2 6, C3 1),
+an integer overrides it (1 = grid pixels, the earlier behaviour). See motion_inputs. A reused
+cache must have been built (or recomputed) for the same flow_input and flow_bin.
+Both are added to parameters.json.
+use_CDAW_pngs (LASCO C2): cache from the CDAW running-difference and intensity
+PNGs instead of FITS (cdaw_inputs; files in <LASCO_imgfolder>/CDAW).
+colorbar_style / speed_limits / speed_bins: speed colour bar, passed to
+track_coronagraph_flows.render_frames ('continuous' or 'discrete', 'auto' limits/bands).
+
 Differences from motion_frame_pipeline.make_frames (which is left unchanged):
 - noise_model ('ring' default, 'global', 'none'): difference images are put in
   noise (sigma) units by single_noise_model.apply_noise_model, so detect_floor
@@ -17,12 +28,12 @@ V1 caches are named V1_<craft|LASCO>_<detector>_* so the original launchers'
 caches are never modified.
 """
 from pathlib import Path
-import tempfile
+import tempfile,json
 import sunpy.map
 from datamine_calib_helper import load_map  # truthful WCS for every source
 from astropy.time import Time
 from prepare_sources import fill_coronagraph,fill_disk,prepare_pfss,ensure_hv_coronagraph,ensure_hv_disk
-from motion_inputs import make_motion_cache
+from motion_inputs import make_motion_cache,check_flow_input,resolve_flow_bin
 from single_noise_model import apply_noise_model
 from goes_cache import resolve_goes_pickle
 from track_coronagraph_flows import render_frames
@@ -51,8 +62,10 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	SDO_instrument=None, SDO_product=None, SDO_dT=None, spacecraft=None,
 	instrument=None, STEREO_imgfolder=None, polar=None, EUVI_fold=None,
 	EUVI_wave=None, EUVI_dT=None, detect_smooth_px=1.5, bright_contrast_snr=False,
-	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None):
+	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None, flow_input='intensity', flow_bin='auto', colorbar_style='discrete', speed_limits='auto', use_CDAW_pngs=False):
 	"""Prepare and render one event using settings from its launcher (V1 options in the module docstring)."""
+	check_flow_input(flow_input)
+	if flow_bin!='auto' and int(flow_bin)<1:raise ValueError("flow_bin must be 'auto' or a positive integer.")
 	root=Path(input_folder).expanduser().resolve()
 	def source(path):
 		return root/Path(path).expanduser() if path is not None else None
@@ -83,31 +96,38 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	if panels is None:raise ValueError("diff_panel must be 'both', 'base' or 'running'.")
 	dest=source(outdir);dest.mkdir(parents=True,exist_ok=True)
 	cache_root=dest/'motion_cache';cache_root.mkdir(exist_ok=True)
-	prefix=f'V1_{craft or "LASCO"}_{detector}_'
+	if use_CDAW_pngs and (mode!='LASCO' or detector!='C2'):raise ValueError('use_CDAW_pngs supports LASCO C2 only.')
+	prefix=f'V1_{craft or "LASCO"}_{detector}_'+('CDAW_' if use_CDAW_pngs else '')
 	if reuse_cache:
 		if reuse_cache=='latest':
-			found=sorted(cache_root.glob(prefix+'*'),key=lambda p:p.stat().st_mtime)
+			found=sorted((p for p in cache_root.glob(prefix+'*') if use_CDAW_pngs or '_CDAW_' not in p.name),key=lambda p:p.stat().st_mtime)
 			if not found:raise FileNotFoundError(f'No {prefix}* cache in {cache_root}.')
 			motion_cache=found[-1]
 		else:
 			motion_cache=Path(reuse_cache).expanduser()
 			if not motion_cache.is_absolute():motion_cache=root/motion_cache
 		if not (motion_cache/'times.json').is_file():raise FileNotFoundError(f'Not a motion cache: {motion_cache}')
+		check_cache_flow_input(motion_cache,flow_input,flow_bin)
 		print(f'Redraw only, reusing {motion_cache}',flush=True)
 		download=False
-	if download:
+	if download and not use_CDAW_pngs:
 		fill_coronagraph(folder,detector,craft,sT,eT,dT,base_diff_DT,reference_lookback,
 			max_image_dt,need_LASCO_calib,polar,helioviewer)
 	# Science FITS if they cover every cadence slot; otherwise Helioviewer maps_HV.
 	# Route Level-1 -> Helioviewer -> Level-0.5 (STEREO always; LASCO when
 	# need_LASCO_calib is True). need_LASCO_calib=False keeps Level-0.5 first.
 	prefer_hv=bool(craft) or need_LASCO_calib is not False
-	if not reuse_cache:
+	if not reuse_cache and use_CDAW_pngs:  # CDAW PNGs in <LASCO_imgfolder>/CDAW
+		from cdaw_inputs import make_cdaw_cache
+		motion_cache=Path(tempfile.mkdtemp(prefix=prefix,dir=cache_root))
+		make_cdaw_cache(folder/'CDAW',sT,eT,dT,base_diff_DT,reference_lookback,max_image_dt,max_gap_seconds,lo,hi,motion_cache,
+			detector=detector,download=download,flow_input=flow_input,flow_bin=flow_bin)
+	elif not reuse_cache:
 		ensure_hv_coronagraph(folder,detector,craft,sT,eT,dT,base_diff_DT,reference_lookback,
 			max_image_dt,download,helioviewer,prefer_hv)
 		motion_cache=Path(tempfile.mkdtemp(prefix=prefix,dir=cache_root))
 		make_motion_cache(folder,detector,craft,sT,eT,dT,base_diff_DT,reference_lookback,
-			max_image_dt,max_gap_seconds,npix,lo,hi,motion_cache,prefer_helioviewer=prefer_hv)
+			max_image_dt,max_gap_seconds,npix,lo,hi,motion_cache,prefer_helioviewer=prefer_hv,flow_input=flow_input,flow_bin=flow_bin,use_helioviewer=bool(helioviewer))
 	apply_noise_model(motion_cache,noise_model,ring_step_rsun,ring_strength)
 	if download:
 		disk_folder=source(EUVI_fold if craft else SDO_fold)
@@ -127,6 +147,7 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 				dict(rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat))
 		if not pfss_models and not any((p.parent/'metadata.json').is_file() for p in model.rglob('field_lines.npz')):
 			raise FileNotFoundError(f'No saved PFSS model in {model}.')
+	frames=source(final_image_folder) if final_image_folder else dest/'frames'
 	render_frames(motion_cache,
 		panel_keys=panels,
 		display_stretch=display_stretch,
@@ -141,7 +162,7 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 		EUVI_fold=source(EUVI_fold),
 		pfss_dir=model,
 		outdir=dest,
-		final_image_folder=source(final_image_folder) if final_image_folder else dest/'frames',
+		final_image_folder=frames,
 		SDO_instrument=SDO_instrument,
 		SDO_product=SDO_product,
 		EUVI_wave=EUVI_wave,
@@ -168,6 +189,8 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 		arrow_length_pixels=arrow_length_pixels,
 		centroid_arrow_length_pixels=centroid_arrow_length_pixels,
 		speed_bins=speed_bins,
+		colorbar_style=colorbar_style,
+		speed_limits=speed_limits,
 		pfss_needed=pfss_needed,
 		pfss_models=pfss_models,
 		disk_max_minutes=disk_max_minutes,
@@ -202,4 +225,22 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 		detect_floor=detect_floor,
 		max_gap_seconds=max_gap_seconds,
 		dpi=dpi)
+	record_flow_input(frames,flow_input,resolve_flow_bin(motion_cache,flow_bin))
 	return motion_cache
+
+def check_cache_flow_input(cache,flow_input,flow_bin=1):
+	"""Raise ValueError if a reused cache was built for another flow_input or flow_bin (use recompute_flow on a copy)."""
+	cache=Path(cache);f=cache/('combined_scales.json' if (cache/'combined_scales.json').is_file() else 'noise_scales.json')
+	info=json.loads(f.read_text()) if f.is_file() else {}
+	if flow_bin=='auto':
+		from motion_inputs import resolve_flow_bin
+		flow_bin=resolve_flow_bin(cache,'auto') if (cache/'coordinates.npz').is_file() and not (cache/'combined_scales.json').is_file() else 1
+	have=(info.get('flow_input','intensity'),info.get('flow_bin',1))
+	if have!=(flow_input,int(flow_bin)):raise ValueError(f"{cache} has flow_input={have[0]!r}, flow_bin={have[1]}; launcher asks {flow_input!r}, {int(flow_bin)}. "
+		f"Copy the cache and run recompute_flow(copy,{flow_input!r},flow_bin={int(flow_bin)}), or change the launcher.")
+
+def record_flow_input(frames,flow_input,flow_bin=1):
+	"""Add flow_input and flow_bin to the parameters.json that render_frames wrote in frames."""
+	p=Path(frames)/'parameters.json'
+	if p.is_file():d=json.loads(p.read_text());d.update(flow_input=flow_input,flow_bin=int(flow_bin));p.write_text(json.dumps(d,indent=2))
+

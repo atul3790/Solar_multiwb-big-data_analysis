@@ -1,6 +1,20 @@
-"""Render cached coronagraph intensity-flow vectors along bright and dark edges.
+"""Render moving-structure frames from a motion cache (single coronagraph or COR2+HI1).
 
-This demonstration does not re-estimate optical flow or edit core modules.
+render_frames detects bright and dark regions in the cached base/running
+differences, samples the cached TV-L1 flow along their edges and at their
+centroids, and draws each frame: difference panel(s) with contours and speed-
+coloured arrows, PFSS and AR field lines, an optional disk image and the
+LAT/GOES light curves. Optical flow is not re-estimated here.
+
+Axes are in solar radii; LASCO ticks are symmetric values inside the field.
+Speed colour bar, one axis for all frames: colorbar_style 'continuous'
+(speed_limits 'auto' = 0 to the fastest drawn vector rounded up, or (vmin, vmax))
+or 'discrete' (speed_bins: 'auto' bands up to the fastest vector, or a list).
+
+Saves PNG frames, an MP4, edge_vectors.csv, centroid_vectors.csv, regions.csv,
+per-frame masks and parameters.json in final_image_folder.
+
+Importable: render_frames, write_mp4, speed_colour_axis, auto_speed_bins, speed_axis_max.
 """
 from pathlib import Path
 import copy,csv,json,io,warnings,pickle,re
@@ -19,7 +33,7 @@ from datamine_calib_helper import load_map  # truthful WCS for every source
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.colors import BoundaryNorm
+from matplotlib.colors import BoundaryNorm,Normalize
 from matplotlib.cm import ScalarMappable
 from matplotlib.lines import Line2D
 import matplotlib.patheffects as pe
@@ -102,6 +116,38 @@ def frame_map(ref,t,item):
 				f'got ({obs.lon.deg:.6f}, {obs.lat.deg:.6f}, {obs.radius.to_value(u.m):.3f} m)')
 	return m
 
+SPEED_LADDER=(0,50,100,200,300,400,500,600,800,1000,1200,1500,2000,2500,3000,4000,5000)
+
+def auto_speed_bins(fastest):
+	"""Discrete bands (km/s): SPEED_LADDER up to the first value >= fastest."""
+	top=next((v for v in SPEED_LADDER if v>=fastest and v>0),None)
+	return [float(v) for v in SPEED_LADDER if v<=top] if top else [float(v) for v in SPEED_LADDER]+[speed_axis_max([fastest])]
+
+def speed_colour_axis(fastest,colorbar_style='discrete',speed_limits='auto',speed_bins='auto'):
+	"""(auto_continuous, norm, cmap, bins, limits) for the speed colour bar.
+
+	colorbar_style 'continuous': Normalize over speed_limits, 'auto' = 0 to
+	speed_axis_max(fastest) or (vmin, vmax) in km/s. 'discrete': BoundaryNorm on
+	speed_bins, 'auto' = auto_speed_bins(fastest) or a list of km/s boundaries.
+	"""
+	style=str(colorbar_style).strip().lower()
+	if style=='continuous':
+		lim=(0.,speed_axis_max([fastest])) if isinstance(speed_limits,str) and speed_limits.strip().lower()=='auto' else tuple(map(float,speed_limits))
+		if len(lim)!=2 or not lim[1]>lim[0]:raise ValueError("speed_limits must be 'auto' or (vmin, vmax) with vmax > vmin.")
+		return True,Normalize(*lim),plt.get_cmap('rainbow_r'),None,list(lim)
+	if style!='discrete':raise ValueError("colorbar_style must be 'continuous' or 'discrete'.")
+	bins=auto_speed_bins(fastest) if isinstance(speed_bins,str) and speed_bins.strip().lower()=='auto' else [float(v) for v in speed_bins]
+	cmap=plt.get_cmap('rainbow_r',len(bins)-1)
+	return False,BoundaryNorm(bins,cmap.N),cmap,bins,None
+
+def speed_axis_max(speeds):
+	"""Colour-axis top (km/s): the fastest vector rounded up to half a decade step
+	(1221 -> 1500, 583 -> 600, 2300 -> 2500); 100 if there are no vectors."""
+	v=max(speeds,default=0.)
+	if not v>0:return 100.
+	half=10**np.floor(np.log10(v))/2
+	return float(np.ceil(v/half-1e-9)*half)
+
 def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_region_span_rsun=None,
 	panel_keys=('base_difference','running_difference'),display_limit=None,
 	display_stretch='linear',display_soft=1.,display_smooth_px=0.,ar_seed_spacing_deg=None,ar_long_loops=True,show_vectors=True,n_AR_open=None,
@@ -114,7 +160,7 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	pfss_needed, pfss_models, disk_max_minutes, bright_border, dark_border, new_border, border_width,
 	n_open, n_global_closed, n_closed, ar_half_lon, ar_half_lat, ar_half_box_arcsec, spoke_pa,
 	spoke_halfwidth, spoke_arrow_buffer_deg, mask_buffer_px, detect_sigma, detect_min_area, region_span_rsun, weak_bright_factor,
-	flow_support_radius_rsun, bright_contrast, bright_min_area, arrow_min_area, detect_floor, max_gap_seconds, dpi):
+	flow_support_radius_rsun, bright_contrast, bright_min_area, arrow_min_area, detect_floor, max_gap_seconds, dpi, colorbar_style='discrete', speed_limits='auto'):
 	"""Render aligned motion products using settings supplied by the task script.
 
 	n_AR_open: maximum number of open AR field lines (magenta) drawn, spread evenly
@@ -141,6 +187,10 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	False keeps the old median difference in image units. region_min_width_rsun
 	and region_max_aspect set the minimum breadth and maximum length/breadth of a
 	region's fitted box (None: no limit); thin lines (HI1 artifacts) are dropped.
+	colorbar_style: 'discrete' (default; bands from speed_bins, a list of km/s
+	boundaries or 'auto' = SPEED_LADDER up to the fastest vector) or 'continuous'
+	(speed_limits 'auto' = 0 to the fastest vector rounded up, or (vmin, vmax)).
+	One colour axis for all frames; the fastest drawn vector in sT-eT sets 'auto'.
 	"""
 	rooted=ar_seed_spacing_deg is not None
 	if rooted:
@@ -373,8 +423,11 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 		np.savez_compressed(outdir_frames/f'{path.stem}_masks.npz',valid=valid,arrow_valid=arrow_valid,**{key+'_'+name:arr for key,(labs,news,_) in panels.items() for name,arr in zip(('bright','dark','new_bright','new_dark'),[*labs,*news])})
 		frames.append((m,t,dt,data,panels,item));prior,prior_time=new_prior,t.isot
 	if not frames:raise ValueError('No cached motion frames in sT–eT.')
-	cmap=plt.get_cmap('rainbow_r',len(speed_bins)-1)
-	norm=BoundaryNorm(speed_bins,cmap.N)
+	# One speed colour axis for all frames, from the fastest drawn vector (edge or
+	# centroid) in sT-eT when limits/bins are 'auto' (speed_colour_axis).
+	fastest=max((r['speed_projected_kms'] for r in all_rows+centroid_rows),default=0.)
+	continuous,norm,cmap,speed_bins,speed_limits=speed_colour_axis(fastest,colorbar_style,speed_limits,speed_bins)
+	print(f'Speed colour axis ({"continuous "+"-".join(f"{v:g}" for v in speed_limits) if continuous else "bands "+",".join(f"{v:g}" for v in speed_bins)} km/s; fastest vector {fastest:.0f} km/s)',flush=True)
 	# Grey-scale half-range per panel. None: largest per-frame 99th percentile
 	# (one stretch for the movie; a strong CME frame then flattens the rest).
 	# 'median': median of the per-frame 99th percentiles. 'frame': each frame
@@ -450,20 +503,21 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 			ny,nx=xr.shape
 			for axis,coords,set_ticks in (('x',xr[ny//2],ax.set_xticks),('y',yr[:,nx//2],ax.set_yticks)):
 				step=5 if np.ptp(coords)<50 else 10
-				vals=(np.arange(np.ceil(coords.min()/step),np.floor(coords.max()/step)+1)*step
-					if stereo else np.arange(-20,21,10))
+				if stereo:vals=np.arange(np.ceil(coords.min()/step),np.floor(coords.max()/step)+1)*step
+				else:  # LASCO: symmetric ticks inside the field (C2 -5..5, C3 -20..20)
+					edge=min(-coords.min(),coords.max());vals=np.arange(-np.floor(edge/step),np.floor(edge/step)+1)*step
 				if style(axis+'ticks') is not None:vals=style(axis+'ticks')
 				order=np.argsort(coords)
 				set_ticks(np.interp(vals,coords[order],order),labels=[f'{v:g}' for v in vals])
 			ax.tick_params(axis='x',labelsize=style('xtick_size',13));ax.tick_params(axis='y',labelsize=style('ytick_size',13))
 			ax.set_xlabel(style('xlabel',r'Solar X ($R_\odot$)'),fontsize=style('xlabel_size',16))
 			ax.set_ylabel(style('ylabel',r'Solar Y ($R_\odot$)'),fontsize=style('ylabel_size',16))
-		centres=(np.asarray(speed_bins[:-1])+np.asarray(speed_bins[1:]))/2
-		cb=fig.colorbar(ScalarMappable(norm=norm,cmap=cmap),ax=list(axs),panchor=(.5,1),shrink=.78,pad=.02,boundaries=speed_bins,ticks=centres,spacing='uniform',extend='max')
-		cb.ax.set_yticklabels([f'{a:g}–{b:g}' for a,b in zip(speed_bins[:-1],speed_bins[1:])])
+		if continuous:cb=fig.colorbar(ScalarMappable(norm=norm,cmap=cmap),ax=list(axs),panchor=(.5,1),shrink=.78,pad=.02,extend='max' if fastest>speed_limits[1] else 'neither')
+		else:
+			centres=(np.asarray(speed_bins[:-1])+np.asarray(speed_bins[1:]))/2
+			cb=fig.colorbar(ScalarMappable(norm=norm,cmap=cmap),ax=list(axs),panchor=(.5,1),shrink=.78,pad=.02,boundaries=speed_bins,ticks=centres,spacing='uniform',extend='max')
+			cb.ax.set_yticklabels([f'{a:g}–{b:g}' for a,b in zip(speed_bins[:-1],speed_bins[1:])])
 		cb.set_label(style('colorbar_label','Speed magnitude |v| (km/s)'),fontsize=style('colorbar_label_size',13));cb.ax.tick_params(labelsize=style('colorbar_tick_size',15),length=0)
-		cb.ax.text(.5,1.06,'Faster',transform=cb.ax.transAxes,ha='center',fontsize=11)
-		cb.ax.text(.5,-.06,'Slower',transform=cb.ax.transAxes,ha='center',fontsize=11)
 		if not show_vectors:cb.ax.set_visible(False)  # keep the panel layout
 		gap=' | gap: arrows and associations withheld' if dt>max_gap_seconds else ''
 		default_title=f'{m.instrument} {m.detector} | {t.strftime("%Y-%m-%d %H:%M:%S")} UT | $\\delta t$ = {dt/60:.1f} min{gap}'
@@ -525,7 +579,7 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	pd.DataFrame(disk_sources).to_csv(outdir_frames/'disk_sources.csv',index=False)
 	movie_name=f'{str(ref.detector).upper().replace("+","_")}_edge_velocity.mp4'
 	write_mp4(paths,outdir_frames/movie_name)
-	(outdir_frames/'parameters.json').write_text(json.dumps(dict(region_span_rsun=region_span_rsun,base_region_span_rsun=base_region_span_rsun,weak_bright_factor=weak_bright_factor,flow_support_radius_rsun=flow_support_radius_rsun,speed_cmap='rainbow_r',speed_bins_kms=speed_bins,colourbar_spacing='categorical equal-sized bands; numeric intervals explicitly labelled',edge_spacing_pixels=edge_spacing,support_radius_pixels=support_radius,min_support=min_support,min_displacement_pixels=min_displacement,arrow_length_pixels=arrow_length_pixels,centroid_arrow_length_pixels=centroid_arrow_length_pixels,length_encodes_speed=False,flow_source='previous trial intensity TV-L1, source vectors advected to target positions',n_open=n_open,n_global_closed=n_global_closed,n_closed=n_closed,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,ar_half_box_arcsec=ar_half_box_arcsec,spoke_pa=spoke_pa,spoke_halfwidth=spoke_halfwidth,spoke_arrow_buffer_deg=spoke_arrow_buffer_deg,bright_contrast=bright_contrast,bright_contrast_snr=bool(bright_contrast_snr),detect_smooth_px=detect_smooth_px,region_min_width_rsun=region_min_width_rsun,region_max_aspect=region_max_aspect,bright_min_area=bright_min_area,arrow_min_area=arrow_min_area,mask_buffer_px=mask_buffer_px,detect_sigma=detect_sigma,detect_floor=detect_floor,detect_min_area=detect_min_area,max_gap_seconds=max_gap_seconds,disk_folder=str(folder) if folder is not None else None,NOAA_number=NOAA_number if focus_AR else None,pfss_file=str(pfss_file),disk_max_minutes=None if np.isinf(disk_max_minutes) else disk_max_minutes,bright_border=bright_border,dark_border=dark_border,border_width=border_width,physical_velocity_validated=False),indent=2))
+	(outdir_frames/'parameters.json').write_text(json.dumps(dict(region_span_rsun=region_span_rsun,base_region_span_rsun=base_region_span_rsun,weak_bright_factor=weak_bright_factor,flow_support_radius_rsun=flow_support_radius_rsun,speed_cmap='rainbow_r',colorbar_style='continuous' if continuous else 'discrete',speed_bins_kms=speed_bins,speed_limits_kms=speed_limits,fastest_vector_kms=fastest,colourbar_spacing='continuous' if continuous else 'categorical equal-sized bands; numeric intervals explicitly labelled',edge_spacing_pixels=edge_spacing,support_radius_pixels=support_radius,min_support=min_support,min_displacement_pixels=min_displacement,arrow_length_pixels=arrow_length_pixels,centroid_arrow_length_pixels=centroid_arrow_length_pixels,length_encodes_speed=False,flow_source='previous trial intensity TV-L1, source vectors advected to target positions',n_open=n_open,n_global_closed=n_global_closed,n_closed=n_closed,ar_half_lon=ar_half_lon,ar_half_lat=ar_half_lat,ar_half_box_arcsec=ar_half_box_arcsec,spoke_pa=spoke_pa,spoke_halfwidth=spoke_halfwidth,spoke_arrow_buffer_deg=spoke_arrow_buffer_deg,bright_contrast=bright_contrast,bright_contrast_snr=bool(bright_contrast_snr),detect_smooth_px=detect_smooth_px,region_min_width_rsun=region_min_width_rsun,region_max_aspect=region_max_aspect,bright_min_area=bright_min_area,arrow_min_area=arrow_min_area,mask_buffer_px=mask_buffer_px,detect_sigma=detect_sigma,detect_floor=detect_floor,detect_min_area=detect_min_area,max_gap_seconds=max_gap_seconds,disk_folder=str(folder) if folder is not None else None,NOAA_number=NOAA_number if focus_AR else None,pfss_file=str(pfss_file),disk_max_minutes=None if np.isinf(disk_max_minutes) else disk_max_minutes,bright_border=bright_border,dark_border=dark_border,border_width=border_width,physical_velocity_validated=False),indent=2))
 
 if __name__=='__main__':
 	raise SystemExit('Run the LASCO or STEREO frame maker instead.')

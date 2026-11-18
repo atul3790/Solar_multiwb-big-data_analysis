@@ -98,7 +98,9 @@ def ensure_hv_coronagraph(folder,detector,craft,sT,eT,dT,base,lookback,max_image
 	the whole interval (download and helioviewer enabled), plus the predecessor
 	window and the base reference, then converted to FITS in maps_HV beside the
 	instrument's other products (STEREO: <root>/STEREO_<sc>/<detector>/maps_HV).
-	make_motion_cache then uses the family covering most slots (ties: science).
+	make_motion_cache then applies its family rule (motion_inputs.select_family).
+	helioviewer=False: nothing is fetched or converted, and Helioviewer FITS
+	already on disk are not used by the flow pipelines.
 	"""
 	from motion_inputs import inventory,product_groups,group_coverage,family_priority
 	start,end,b=map(Time,(sT,eT,base))
@@ -111,6 +113,8 @@ def ensure_hv_coronagraph(folder,detector,craft,sT,eT,dT,base,lookback,max_image
 	science=max((len(targets)-len(group_coverage(g,start,end,targets,b,lookback,max_image_dt)[1]) for g in above),default=0)
 	print(f'{detector}: FITS ranked above Helioviewer cover {science}/{len(targets)} cadence slots',flush=True)
 	if science==len(targets):return 'science'
+	if not helioviewer:
+		print(f'{detector}: helioviewer=0, Helioviewer images are not fetched, converted or used',flush=True);return 'science'
 	# Event slots on the same grid as make_motion_cache, then predecessor and base.
 	windows=[(start,end),(start-lookback*u.s,start),(b-max_image_dt*u.s,b+max_image_dt*u.s)]
 	if download and helioviewer:
