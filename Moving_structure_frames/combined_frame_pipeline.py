@@ -9,8 +9,10 @@ plot style) pass straight to track_coronagraph_flows.render_frames.
 Same steps as motion_frame_pipeline.make_frames for STEREO, with two changes:
 HI1 sums are fetched through Multiwb_datamine.get_STEREO_imgs (route
 Level-1 -> Helioviewer -> Level-0.5), and the motion cache is the combined
-COR2+HI1 grid from combined_motion_inputs. Only one difference panel
-(base or running) is drawn above the LAT/GOES light curves.
+COR2+HI1 grid from combined_motion_inputs. One difference panel is drawn
+above the LAT/GOES light curves: diff_panel='base' or 'running'; 'both' builds
+the cache once and renders the base and the running frames into separate
+folders (final_image_folder may then be a dict {'base': ..., 'running': ...}).
 """
 from pathlib import Path
 import tempfile,json
@@ -45,8 +47,9 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 		return root/Path(path).expanduser() if path is not None else None
 	if Time(eT)<=Time(sT) or Time(base_diff_DT)>Time(sT) or dT<=0:
 		raise ValueError('Require eT > sT, base_diff_DT <= sT, and positive dT.')
-	panel={'base':'base_difference','running':'running_difference'}.get(str(diff_panel).lower())
-	if panel is None:raise ValueError("diff_panel must be 'base' or 'running'.")
+	keys={'base':'base_difference','running':'running_difference'};dp=str(diff_panel).lower()
+	panels=['base','running'] if dp=='both' else [dp]
+	if dp!='both' and dp not in keys:raise ValueError("diff_panel must be 'base', 'running' or 'both'.")
 	craft=spacecraft.upper()
 	if craft not in ('A','B'):raise ValueError('spacecraft must be A or B.')
 	lo=2.5 if r_inner is None else r_inner
@@ -121,14 +124,16 @@ def make_combined_frames(*,diff_panel,STEREO_root,spacecraft,sT,eT,dT,base_diff_
 			raise FileNotFoundError(f'No saved PFSS model in {model}.')
 	SRS_file=render.pop('SRS_file',None)
 	# Spoke masking already applied to the COR2 zone of the cache.
-	frames=source(final_image_folder) if final_image_folder else dest/'frames'
-	render_frames(motion_cache,panel_keys=(panel,),sT=sT,eT=eT,LASCO='COR2+HI1',SDO_fold=None,
-		EUVI_fold=disk_folder,pfss_dir=model,outdir=dest,
-		final_image_folder=frames,
-		SDO_instrument=None,SDO_product=None,EUVI_wave=EUVI_wave,SRS_file=source(SRS_file),
-		user_datacsv=source(user_datacsv),goes_pickle=goes_p,goes_csv_input=goes_c,
-		pfss_needed=pfss_needed,pfss_models=pfss_models,disk_max_minutes=disk_max_minutes,
-		spoke_pa=spoke_pa,spoke_halfwidth=0.,spoke_arrow_buffer_deg=0.,
-		max_gap_seconds=max_gap_seconds,**render)
-	record_flow_input(frames,flow_input)
+	for p in panels:  # 'both': one render per panel from the same cache, each in its own folder
+		f=final_image_folder.get(p) if isinstance(final_image_folder,dict) else final_image_folder
+		frames=source(f) if f else dest/('frames'+(f'_{p}' if dp=='both' else ''))
+		render_frames(motion_cache,panel_keys=(keys[p],),sT=sT,eT=eT,LASCO='COR2+HI1',SDO_fold=None,
+			EUVI_fold=disk_folder,pfss_dir=model,outdir=dest,
+			final_image_folder=frames,
+			SDO_instrument=None,SDO_product=None,EUVI_wave=EUVI_wave,SRS_file=source(SRS_file),
+			user_datacsv=source(user_datacsv),goes_pickle=goes_p,goes_csv_input=goes_c,
+			pfss_needed=pfss_needed,pfss_models=pfss_models,disk_max_minutes=disk_max_minutes,
+			spoke_pa=spoke_pa,spoke_halfwidth=0.,spoke_arrow_buffer_deg=0.,
+			max_gap_seconds=max_gap_seconds,**render)
+		record_flow_input(frames,flow_input)
 	return motion_cache

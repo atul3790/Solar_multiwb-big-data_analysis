@@ -66,7 +66,7 @@ Edit only the INPUT block of a script, then run it with `python script.py` or `%
 |---|---|
 | `make_moving_structure_frames_LASCO.py` | LASCO C2 or C3 flow frames: base and running difference panels, bright/dark contours, edge and centroid drift arrows, PFSS, an SDO disk image (HMI or AIA) and LAT/GOES curves. C2 can also run on the CDAW PNGs (`use_CDAW_pngs=1`). |
 | `make_moving_structure_frames_STEREO.py` | Same for STEREO COR1 or COR2, with an EUVI disk image and PFSS projected from STEREO's viewpoint |
-| `make_moving_structure_frames_STEREO_COR2_HI1.py` | COR2 and HI1 joined on one helioprojective grid from STEREO-A, following structures out to about 90 R☉. Draws one panel (`diff_panel='base'` or `'running'`). |
+| `make_moving_structure_frames_STEREO_COR2_HI1.py` | COR2 and HI1 joined on one helioprojective grid from STEREO-A, following structures out to about 90 R☉. Draws one panel (`diff_panel='base'` or `'running'`); `'both'` builds the cache once and saves the base and running frames in two folders (`<output_tag>_bdiff`, `<output_tag>_rdiff`). |
 | `flow_input_comparison.py` | Compares the flow of two caches built with different `flow_input` (quality fraction, speed, angle difference, time since base); CSV and PNG |
 | `make_LASCO_overlay_frames.py` | LASCO difference images with HMI/AIA disk, global and AR-focused PFSS lines, and LAT/GOES panels |
 | `make_STEREO_overlay_frames.py` | STEREO COR1/COR2 difference images with EUVI disk and observer-projected PFSS, plus LAT/GOES panels |
@@ -149,7 +149,7 @@ These are the less obvious ones; the guide above each INPUT block documents ever
 | `detect_smooth_px`, `bright_contrast_snr` | Smoothing (grid pixels) before thresholding. With `bright_contrast_snr=1`, `bright_contrast` is a unitless local SNR: (region 95th percentile − ring mean) / ring std. COR2 + HI1 uses 4 px and SNR ≥ 2, which brings out faint diffuse structures. |
 | `region_min_width_rsun`, `region_max_aspect` | Minimum breadth and maximum length/breadth of each region's fitted box. Drops thin lines such as HI1 artifacts (COR2 + HI1: 0.8 Rsun, 6). `''` = no limit. |
 | `display_stretch`, `display_limit`, `display_smooth_px` | Display only (asinh stretch, grey-scale limit in sigma, smoothing). Detection is unaffected. |
-| `diff_panel` | `'both'`, `'base'` or `'running'` (COR2 + HI1: one panel) |
+| `diff_panel` | `'both'`, `'base'` or `'running'`. LASCO/STEREO: `'both'` draws both panels in one frame. COR2 + HI1: one panel per frame; `'both'` renders base and running from the same cache into separate folders, `output_tag` + `_bdiff` / `_rdiff`. |
 | `ar_half_lon`, `ar_half_lat`, `AR_seed_spacing_deg` | AR rectangle (degrees about the NOAA centre) and seed spacing for AR field lines. Same settings in the flow launchers and the LASCO/STEREO overlay makers, which share one traced-line cache per PFSS snapshot (`PFSS/<snapshot>/AR_field_lines_rooted.npz`). |
 | `trace_longARrooted_loops` | 1 keeps closed loops with one footpoint in the AR rectangle, so long AR loops are shown. 0 needs both footpoints inside. |
 | `AR_loop_reach_deg` | Closed AR loops are drawn only if both ends lie within this distance (degrees on the Sun) of the NOAA centre; default 50. Keeps AR–quiet-Sun and AR–AR connectors and drops longer PFSS loops (e.g. to the polar caps, where PFSS is least reliable). `''` = no limit. Selection only: cached traces are reused. |

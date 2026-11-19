@@ -3,7 +3,8 @@
 Same products as make_moving_structure_frames_STEREO.py (contours, edge and
 centroid velocity arrows, PFSS, EUVI disk, light curves, CSVs, MP4), but the
 flow field is COR2 joined with HI1 on one helioprojective grid, and only one
-difference panel is drawn (diff_panel='base' or 'running').
+difference panel is drawn (diff_panel='base' or 'running'). diff_panel='both' builds the
+cache once and saves base and running frames in two folders (output_tag + '_bdiff' / '_rdiff').
 
 HI1 comes from Multiwb_datamine.get_STEREO_imgs(instruments=['HI1']):
 Level-1 (local UKSSDC files) -> Helioviewer (no HI source) -> Level-0.5 (SSC).
@@ -25,7 +26,9 @@ from combined_frame_pipeline import make_combined_frames
 #     are resolved here, regardless of where Python starts.
 # sT: Start of the requested UTC event window, as YYYY-MM-DDThh:mm:ss.
 # eT: End of the requested UTC event window. Use a time later than sT.
-# diff_panel: 'running' or 'base': the one difference image analysed and drawn.
+# diff_panel: 'running' or 'base': the one difference image analysed and drawn. 'both' runs
+#     both from one motion cache and saves them in separate folders, the output_tag
+#     getting '_bdiff' (base) and '_rdiff' (running).
 # spacecraft_choice: 1 = STEREO-A; 2 = STEREO-B (B ended in 2014).
 # STEREO_root: Database root given to get_STEREO_imgs; COR2 lives in <root>/STEREO_<sc>/COR2
 #     and HI1 in <root>/STEREO_<sc>/HI1. Shared with the STEREO overlay maker (its
@@ -264,7 +267,9 @@ from combined_frame_pipeline import make_combined_frames
 # outdir: Run output root, including the generated motion cache. A relative path is resolved
 #     under basedir.
 # output_tag: Optional suffix for the output folder, which is named
-#     pfss_stereo<sc>_COR2_HI1_motion_<diff_panel>_EUVI<wave>_LC_<output_tag>.
+#     pfss_stereo<sc>_COR2_HI1_motion_<diff_panel>_EUVI<wave>_LC_<output_tag>. With
+#     diff_panel='both': ..._motion_base_..._<output_tag>_bdiff and
+#     ..._motion_running_..._<output_tag>_rdiff.
 
 #################### INPUT ####################
 
@@ -272,7 +277,7 @@ from combined_frame_pipeline import make_combined_frames
 basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
 sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC
 eT='YYYY-MM-DDThh:mm:ss'  # Event end, UTC
-diff_panel='base'                 # 'running' or 'base'
+diff_panel='base'                 # 'running', 'base' or 'both' (two folders)
 spacecraft_choice=1
 STEREO_root='STEREO'
 EUVI_fold='STEREO/STEREO_A/EUVI'
@@ -444,7 +449,10 @@ if __name__=='__main__':
 		colorbar_tick_size=colorbar_tick_size,legend_labels=(legend_bright_label,legend_dark_label))
 	spacecraft={1:'A',2:'B'}.get(spacecraft_choice)
 	if spacecraft is None:raise ValueError('Invalid spacecraft_choice.')
-	final_image_folder=Path(outdir)/(f'pfss_stereo{spacecraft}_COR2_HI1_motion_{diff_panel}_EUVI{EUVI_wave}_LC'+(f'_{output_tag}' if output_tag else ''))
+	name=lambda p,tag:Path(outdir)/(f'pfss_stereo{spacecraft}_COR2_HI1_motion_{p}_EUVI{EUVI_wave}_LC'+(f'_{tag}' if tag else ''))
+	if str(diff_panel).lower()=='both':  # one folder per panel: <output_tag>_bdiff, <output_tag>_rdiff
+		final_image_folder={p:name(p,(f'{output_tag}_' if output_tag else '')+s) for p,s in (('base','bdiff'),('running','rdiff'))}
+	else:final_image_folder=name(diff_panel,output_tag)
 	blank=lambda v:None if v=='' else v
 	make_combined_frames(diff_panel=diff_panel,STEREO_root=STEREO_root,spacecraft=spacecraft,
 		sT=sT,eT=eT,dT=dT,base_diff_DT=base_diff_DT,max_image_dt=max_image_dt,
