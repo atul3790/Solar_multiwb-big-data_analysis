@@ -18,6 +18,10 @@ def disk_layer(target,source,max_minutes=60.,resolution=160):
 		if 'EUVI' not in src:raise ValueError('STEREO coronagraph disk underlay requires EUVI')
 		a,b=target.observer_coordinate,source.observer_coordinate.transform_to(target.observer_coordinate.frame)
 		if a.separation(b)>5*u.deg:raise ValueError('EUVI must be from the matching STEREO viewpoint')
+	if 'METIS' in identity:
+		if 'EUI' not in src:raise ValueError('Solar Orbiter Metis disk underlay requires EUI')
+		a,b=target.observer_coordinate,source.observer_coordinate.transform_to(target.observer_coordinate.frame)
+		if a.separation(b)>5*u.deg:raise ValueError('EUI must be from the Solar Orbiter viewpoint')
 	hpc=target.coordinate_frame
 	center=hpc
 	c=SkyCoord(0*u.arcsec,0*u.arcsec,frame=center)
@@ -62,8 +66,8 @@ def disk_inventory(folder,instrument,product,target):
 					if int(h.get('ZNAXIS',h.get('NAXIS',0)))<2:continue
 					label=' '.join(str(h.get(k,'')) for k in ('INSTRUME','DETECTOR')).upper()
 					if instrument not in label:continue
-					if instrument in ('AIA','EUVI') and int(float(h.get('WAVELNTH',-1)))!=int(product):continue
-					if instrument=='EUVI':
+					if instrument in ('AIA','EUVI','EUI') and int(float(h.get('WAVELNTH',-1)))!=int(product):continue
+					if instrument in ('EUVI','EUI'):
 						name=str(h.get('OBSRVTRY',h.get('TELESCOP',''))).upper().replace('_','').replace('-','').replace(' ','')
 						normalize=lambda n:n.replace('AHEAD','A').replace('BEHIND','B')
 						if normalize(name)!=normalize(target_name):continue

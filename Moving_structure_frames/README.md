@@ -53,6 +53,11 @@ Each event study uses one `basedir`. Every relative path in the launchers' INPUT
   PSP_WISPR/
   LASCO_LAT_frames/              frames, MP4s, CSVs and motion_cache/ for LASCO runs
   STEREO_LAT_frames/             same for STEREO runs
+  SolO/Metis/<product>/{raw,raw_LL02,maps}/  Solar Orbiter Metis (vl-tb, vl-pb, uv); the flow reads maps/
+  SolO/EUI/<product>/raw/        Solar Orbiter EUI Level 2 (fsi174, fsi304)
+  SolO/STIX/                     STIX quick-look light-curve CSVs (raw/ holds the daily SOAR files)
+  SolO_LAT_frames/               same for Solar Orbiter Metis runs
+  SolO/Metis_EUI_rdiff_frames[_EUIrdiff]/  make_SolO_overlay_frames output
   PSP_WISPR_LAT_frames/
 ```
 
@@ -66,17 +71,19 @@ Edit only the INPUT block of a script, then run it with `python script.py` or `%
 |---|---|
 | `make_moving_structure_frames_LASCO.py` | LASCO C2 or C3 flow frames: base and running difference panels, bright/dark contours, edge and centroid drift arrows, PFSS, an SDO disk image (HMI or AIA) and LAT/GOES curves. C2 can also run on the CDAW PNGs (`use_CDAW_pngs=1`). |
 | `make_moving_structure_frames_STEREO.py` | Same for STEREO COR1 or COR2, with an EUVI disk image and PFSS projected from STEREO's viewpoint |
+| `make_moving_structure_frames_SolO.py` | Same for Solar Orbiter Metis (VL total or polarized brightness, or UV Lyman-alpha), with an EUI disk image and PFSS projected from Solar Orbiter's viewpoint. The light-curve panel adds the STIX 4–10 keV quick-look curve in red (own axis, 1-min means, Earth light-arrival time) next to GOES (`STIX_folder`, `stix_band`; `Multiwb_datamine.get_STIX_LC`). Metis and EUI Level 2 come from ESA SOAR; bins without public Level 2 use low-latency LL02 quick-looks (a separate family, never mixed). |
 | `make_moving_structure_frames_STEREO_COR2_HI1.py` | COR2 and HI1 joined on one helioprojective grid from STEREO-A, following structures out to about 90 R☉. Draws one panel (`diff_panel='base'` or `'running'`); `'both'` builds the cache once and saves the base and running frames in two folders (`<output_tag>_bdiff`, `<output_tag>_rdiff`). |
 | `flow_input_comparison.py` | Compares the flow of two caches built with different `flow_input` (quality fraction, speed, angle difference, time since base); CSV and PNG |
 | `make_LASCO_overlay_frames.py` | LASCO difference images with HMI/AIA disk, global and AR-focused PFSS lines, and LAT/GOES panels |
 | `make_STEREO_overlay_frames.py` | STEREO COR1/COR2 difference images with EUVI disk and observer-projected PFSS, plus LAT/GOES panels |
 | `make_PSP_WISPR_overlay_frames.py` | PSP/WISPR field of view with a PFSS spherical-shell wireframe and projected field lines, plus LAT/GOES panels |
+| `make_SolO_overlay_frames.py` | Solar Orbiter Metis tB running difference with the EUI image filling the occulter, a magnified EUI panel (intensity, or running difference with `eui_rdiff=1`) and a STIX (`stix_bands`) + GOES panel over the whole window with a line at each frame, all in Earth light-arrival UT. Axes in solar radii; Metis and EUI aligned by helioprojective angle. Metis/EUI/STIX from ESA SOAR. |
 
 ## How a flow run works
 
 ```
 launcher INPUT
-  └─ motion_frame_pipeline_V1.make_frames_V1      (LASCO / STEREO launchers)
+  └─ motion_frame_pipeline_V1.make_frames_V1      (LASCO / STEREO / SolO launchers)
      combined_frame_pipeline.make_combined_frames (COR2 + HI1 launcher)
        1. prepare_sources       fill missing image bins: Level-1 → Helioviewer → Level-0.5
                                 (Helioviewer skipped with helioviewer=0)
@@ -85,7 +92,7 @@ launcher INPUT
           cdaw_inputs           use_CDAW_pngs=1 (C2): replaces steps 1–2 with the CDAW PNGs
        3. single_noise_model    differences → noise-sigma units (ring noise profile)
           combined_motion_inputs   (same for COR2 + HI1; HI1 flow from star-cleaned images)
-       4. prepare_sources       EUVI/SDO disk images and PFSS snapshots
+       4. prepare_sources       EUVI/EUI/SDO disk images and PFSS snapshots
        5. track_coronagraph_flows.render_frames
             puddle_analysis     signed bright/dark detection
             edge_motion         flow sampled along contours and at centroids
@@ -102,7 +109,7 @@ Steps 1–3 build the motion cache, which is slow (downloads, alignment and flow
 
 | Module | Role | Main functions |
 |---|---|---|
-| `motion_frame_pipeline_V1.py` | One LASCO or STEREO event from download to frames, with sigma-unit noise model, asinh display, redraw mode and `flow_input` | `make_frames_V1` |
+| `motion_frame_pipeline_V1.py` | One LASCO, STEREO or Solar Orbiter Metis event from download to frames, with sigma-unit noise model, asinh display, redraw mode and `flow_input` | `make_frames_V1` |
 | `combined_frame_pipeline.py` | COR2 and HI1 event: COR2 route, HI1 through `get_STEREO_imgs`, combined cache (with `flow_input`), render | `make_combined_frames` |
 | `motion_frame_pipeline.py` | Earlier pipeline with differences in input image units. No launcher uses it now; kept for reference. | `make_frames` |
 
@@ -110,12 +117,12 @@ Steps 1–3 build the motion cache, which is slow (downloads, alignment and flow
 
 | Module | Role | Main functions |
 |---|---|---|
-| `motion_inputs.py` | Inventories local coronagraph FITS and groups them into product families (Level-1, Helioviewer, Level-0.5). Picks one family covering the event, aligns exposures on one angular grid, writes base/running differences and TV-L1 flow on intensity or base differences (`flow_input`, recorded in `noise_scales.json`), optionally on pixel blocks (`flow_bin`). `recompute_flow` rewrites `dx`, `dy`, `quality` of an existing cache for the other input from the images listed in `times.json`. | `inventory`, `select_family`, `make_motion_cache`, `flow`, `recompute_flow`, `auto_flow_bin` |
+| `motion_inputs.py` | Inventories local coronagraph FITS (filtered by observatory for STEREO-A/B and Solar Orbiter) and groups them into product families (Level-1, Helioviewer, Level-0.5; `BTYPE` keeps Metis tB and pB apart). Picks one family covering the event, aligns exposures on one angular grid, writes base/running differences and TV-L1 flow on intensity or base differences (`flow_input`, recorded in `noise_scales.json`), optionally on pixel blocks (`flow_bin`). `recompute_flow` rewrites `dx`, `dy`, `quality` of an existing cache for the other input from the images listed in `times.json`. | `inventory`, `select_family`, `make_motion_cache`, `flow`, `recompute_flow`, `auto_flow_bin` |
 | `combined_motion_inputs.py` | COR2 and HI1 on one helioprojective grid, each differenced against itself and scaled by its own noise. HI1 flow is computed after removing the F-corona and the drifting star field. `flow_input='base_difference'` uses frame − base in COR2 and cleaned sum − cleaned base sum in HI1 (recorded in `combined_scales.json`). | `make_combined_cache`, `combined_grid`, `apply_noise_model`, `hi_clean_flow`, `star_drift`, `recompute_flow` |
 | `cdaw_inputs.py` | `use_CDAW_pngs` (LASCO C2): downloads the CDAW running-difference (`*_lasc2rdf.png`) and intensity-composite (`*_lasc2aia193.png`) images and writes a motion cache: regions from the running differences, flow and base differences from the intensity images. Geometry from the white 1 R☉ limb circle; display units. | `make_cdaw_cache`, `download_cdaw`, `cdaw_geometry` |
 | `flow_input_comparison.py` | Per-frame (and per-zone) flow comparison of two caches, plus region counts from both renders' `regions.csv` | `compare_flow_inputs`, `zone_stats` |
 | `single_noise_model.py` | Puts single-instrument differences in noise-sigma units, optionally divided by a radial noise profile. Reversible, with the state kept in the cache. | `apply_noise_model`, `noise_scale`, `ring_noise_profile` |
-| `prepare_sources.py` | Fills missing image bins through Solar_data_mining. Converts Helioviewer JP2s to FITS where science FITS are missing. Builds UTC-anchored PFSS snapshots. | `fill_coronagraph`, `fill_disk`, `ensure_hv_coronagraph`, `ensure_hv_disk`, `prepare_pfss`, `stereo_root` |
+| `prepare_sources.py` | Fills missing image bins through Solar_data_mining. Converts Helioviewer JP2s to FITS where science FITS are missing. Builds UTC-anchored PFSS snapshots. Solar Orbiter Metis/EUI through `get_Metis_imgs`/`get_SolO_imgs` (no Helioviewer route). | `fill_coronagraph`, `fill_disk`, `ensure_hv_coronagraph`, `ensure_hv_disk`, `prepare_pfss`, `stereo_root`, `solo_root` |
 | `goes_cache.py` | Finds a cached GOES pickle covering the window, or downloads one | `resolve_goes_pickle`, `covering_pickle` |
 
 ### Rendering
@@ -127,10 +134,10 @@ Steps 1–3 build the motion cache, which is slow (downloads, alignment and flow
 | `edge_motion.py` | Samples the flow field along bright/dark contours and at region centroids | `sample_edge_motion`, `sample_centroid_motion`, `contour_pixels` |
 | `pfss_projection.py` | Selects AR closed loops and open lines. Loops can be rooted in the AR rectangle by one footpoint (long loops kept) or by both. `ar_rooted_lines` does tracing, caching and selection in one call for the overlay makers. | `select_ar_closed`, `select_ar_open`, `ar_rooted_lines` |
 | `pfss_fixed_seeds.py` | Retraces one fixed set of Carrington seeds through each PFSS snapshot, so lines evolve smoothly between snapshots. Also traces AR seed patches. | `retrace_pfss`, `trace_ar_lines`, `select_trace_seeds` |
-| `solar_disk_layer.py` | Nearest EUVI or SDO image, reprojected into the coronagraph grid as a disk underlay | `disk_layer`, `nearest_disk`, `disk_inventory` |
+| `solar_disk_layer.py` | Nearest EUVI, EUI or SDO image, reprojected into the coronagraph grid as a disk underlay | `disk_layer`, `nearest_disk`, `disk_inventory` |
 | `noaa_region.py` | Looks up a NOAA active region's position in the daily SRS reports, downloading them if missing | `find_NOAA_location` |
 
-The three overlay makers are self-contained scripts. They hold their own helpers (image cache scans, observer geometry, AR tracing, light-curve panels) and use `solar_overlay` and `solar_overlay_helper` from Solar_data_mining for PFSS and image compositing.
+The four overlay makers are self-contained scripts. They hold their own helpers (image cache scans, observer geometry, AR tracing, light-curve panels) and use `solar_overlay` and `solar_overlay_helper` from Solar_data_mining for PFSS and image compositing.
 
 ## Key settings
 
@@ -203,5 +210,6 @@ python make_moving_structure_frames_STEREO_COR2_HI1.py
 - **Which LASCO source a run used** is printed as a coverage table and saved as `coverage_report.csv` in the cache. If a window shows weak, posterised differences, check whether Helioviewer was chosen (8-bit, bright parts clipped); `helioviewer=0` forces science FITS, at the cost of frames where they are missing.
 - **CDAW PNGs (`use_CDAW_pngs=1`)** are C2 only: CDAW has no C3 intensity composite, and `recompute_flow` does not apply to these caches. CDAW's server drops some requests; downloads are retried (then `curl`), files already saved are reused, and a rerun fills remaining gaps. Speeds are approximate (display units).
 - **COR2 + HI1 has no `flow_bin`**: its flow runs on the grid pixels (~0.1 R☉ at `npix=1024`).
+- **Solar Orbiter Metis** science data are public only at Level 2 (MSB), released with a long delay (complete to mid-2025 as of Nov 2026). L0/L1 and the Metis calibration pipeline are not public; bins without Level 2 use SOAR low-latency LL02 images (preliminary, "not for scientific analysis"), kept as their own family. The Metis field in solar radii scales with Solar Orbiter's distance (about 5–11 R☉ at 0.85 AU), so `r_inner`/`r_outer` default to the header field. There is no Helioviewer route for Solar Orbiter. Use `flow_input='base_difference'` (the SolO launcher default): on 2025-05-30 intensity input gave under 30 km/s for the NW CME, base-difference input 50–350 km/s, still limited by the 30-min Metis cadence. Metis MSB images are stored in the cache in units of 10⁻¹² MSB, because `flow` floors its feature scale at one input unit (LASCO Level-1 MSB input would hit the same floor).
 - **PSP/WISPR** data are public only after a delay. The WISPR maker stops with "No usable WISPR images" until they are released.
 - **Light curves:** the LAT light curve is supplied by the user (`user_datacsv`). GOES XRS-B is fetched automatically.

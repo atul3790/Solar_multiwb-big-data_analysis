@@ -6,8 +6,11 @@ Helioviewer JP2s to FITS where science FITS are missing; with helioviewer=0 noth
 is converted and only science FITS are used. prepare_pfss builds UTC-anchored PFSS
 snapshots. Not used for use_CDAW_pngs runs (cdaw_inputs downloads its own PNGs).
 
+Solar Orbiter (craft='SOLO'): Metis through get_Metis_imgs and EUI through
+get_SolO_imgs (SOAR Level 2 -> low-latency LL02); no Helioviewer route.
+
 Importable: fill_coronagraph, fill_disk, ensure_hv_coronagraph, ensure_hv_disk,
-prepare_pfss, stereo_root.
+prepare_pfss, stereo_root, solo_root.
 """
 from pathlib import Path
 import inspect
@@ -39,13 +42,24 @@ def stereo_root(folder,craft):
 	p=Path(folder).expanduser();tag=f'STEREO_{craft}'
 	return (Path(*p.parts[:p.parts.index(tag)]) if p.parts.index(tag) else Path('.')) if tag in p.parts else p
 
+def solo_root(folder):
+	"""(root, product) of a Solar Orbiter folder <root>/<product>[/maps|raw]; get_Metis_imgs and
+	get_SolO_imgs save into <root>/<product>/{raw,raw_LL02,maps}."""
+	p=Path(folder).expanduser()
+	if p.name in ('maps','raw','raw_LL02'):p=p.parent
+	return p.parent,p.name
+
 def fill_coronagraph(folder,detector,craft,sT,eT,dT,base,lookback,tolerance,calib,polar,helioviewer):
 	from motion_inputs import inventory
 	start,end,b=map(Time,(sT,eT,base))
 	rows=inventory(folder,detector,craft)
 	def fetch(lo,hi):
 		import Multiwb_datamine as dm
-		if craft:
+		if craft=='SOLO':
+			root,product=solo_root(folder)
+			try:dm.get_Metis_imgs(lo,hi,dT,product=product,outdir=str(root))
+			except (OSError,RuntimeError,ValueError) as exc:print(f'Metis: download unsuccessful for {lo} -- {hi}; continuing: {exc}',flush=True)
+		elif craft:
 			dm.get_STEREO_imgs(lo,hi,dT,spacecraft=craft,instruments=[detector],waves=[None],
 				outdir=str(stereo_root(folder,craft)),nproc=1,polar=polar,helioviewer=helioviewer)
 		else:
@@ -72,7 +86,10 @@ def fill_disk(folder,instrument,product,target,craft,sT,eT,cadence,max_minutes,h
 	def fetch(lo,hi):
 		try:
 			import Multiwb_datamine as dm
-			if craft:
+			if craft=='SOLO':
+				root,_=solo_root(folder)
+				dm.get_SolO_imgs(lo,hi,step,instruments=['EUI'],waves=[[product]],outdir=str(root.parent),nproc=1)
+			elif craft:
 				dm.get_STEREO_imgs(lo,hi,step,spacecraft=craft,instruments=['EUVI'],waves=[[product]],
 					outdir=str(stereo_root(folder,craft)),nproc=1,helioviewer=helioviewer)
 			elif 'instruments' in inspect.signature(dm.get_SDO_imgs).parameters:
@@ -113,6 +130,8 @@ def ensure_hv_coronagraph(folder,detector,craft,sT,eT,dT,base,lookback,max_image
 	already on disk are not used by the flow pipelines.
 	"""
 	from motion_inputs import inventory,product_groups,group_coverage,family_priority
+	if craft=='SOLO':
+		print(f'{detector}: Solar Orbiter Metis has no Helioviewer route; science FITS only',flush=True);return 'science'
 	start,end,b=map(Time,(sT,eT,base))
 	targets=np.arange(0,(end-start).sec+1e-6,dT)
 	rows=inventory(folder,detector,craft)

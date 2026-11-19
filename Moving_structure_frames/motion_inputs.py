@@ -105,6 +105,10 @@ def flow_pair(a,b,base,flow_input):
 def spacecraft_id(value):
 	return str(value).upper().replace('_','').replace('-','').replace(' ','').replace('AHEAD','A').replace('BEHIND','B')
 
+def craft_name(spacecraft):
+	"""Observatory id for a spacecraft key: 'A'/'B' -> STEREOA/STEREOB, 'SOLO' -> SOLARORBITER."""
+	return 'STEREO'+spacecraft if spacecraft in ('A','B') else spacecraft_id({'SOLO':'Solar Orbiter'}.get(spacecraft,spacecraft))
+
 def inventory(folder,detector,spacecraft):
 	rows=[]
 	for p in sorted(Path(folder).expanduser().rglob('*')):
@@ -112,7 +116,7 @@ def inventory(folder,detector,spacecraft):
 		try:
 			for hdu in (fits.getheader(p,0),):
 				if str(hdu.get('DETECTOR','')).upper()!=detector:continue
-				if spacecraft and not any(spacecraft_id(hdu.get(k,''))=='STEREO'+spacecraft for k in ('OBSRVTRY','TELESCOP')):continue
+				if spacecraft and not any(spacecraft_id(hdu.get(k,''))==craft_name(spacecraft) for k in ('OBSRVTRY','TELESCOP')):continue
 				preview=bool(hdu.get('OV_HV')) or 'helioviewer' in str(hdu.get('OV_SRC','')).lower()
 				if not preview and not str(hdu.get('BUNIT') or '').strip():continue
 				t=hdu.get('DATE-OBS') or hdu.get('DATE_OBS')
@@ -126,13 +130,13 @@ def product_groups(rows):
 	groups={}
 	for row in rows:
 		_,path,h=row
-		fields=('OV_SRC','OV_CALSR','OV_CAL','OV_FULL','OV_NORM','LEVEL','DATA_LEV','SERIES','INSTRUME','POLAR','FILTER','BUNIT')
+		fields=('OV_SRC','OV_CALSR','OV_CAL','OV_FULL','OV_NORM','LEVEL','DATA_LEV','SERIES','INSTRUME','POLAR','FILTER','BTYPE','BUNIT')  # BTYPE: Metis tB vs pB
 		meta=tuple(str(h.get(k,'')).strip().lower() for k in fields)
 		hv=bool(h.get('OV_HV')) or 'helioviewer' in meta[0]
 		if hv:
 			# All Helioviewer-derived FITS are one display product, whichever code
 			# wrote them: canonical tags, keyed only by instrument (field 8).
-			meta=('helioviewer jp2','','helioviewer visualization; not photometric fits','','true','','','',meta[8],'','','ct')
+			meta=('helioviewer jp2','','helioviewer visualization; not photometric fits','','true','','','',meta[8],'','','','ct')
 		origin='' if any(meta[:2]) else str(path.parent)
 		exposure=h.get('EXPTIME') if not hv and meta[-1] in ('dn','adu','ct','count','counts') else None
 		# Ignore sub-0.1 ms header jitter when grouping raw-count exposures.
@@ -234,12 +238,16 @@ def select_family(folder,detector,spacecraft,start,end,targets,base_time,referen
 	return key,selected,previous,base,missing
 
 def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_inner,r_outer,out,flow_input='intensity',flow_bin=1):
-	"""Align the chosen family on one angular grid and save differences and TV-L1 flow."""
+	"""Align the chosen family on one angular grid and save differences and TV-L1 flow.
+	Solar Orbiter Metis MSB images are stored in units of 1e-12 MSB (see gain)."""
 	print(f'{detector}: using one FITS group ({key[2][0] or key[2][1] or key[2][2] or key[1] or "header provenance"}, BUNIT={key[2][-1]}, {len(selected)} event exposures)',flush=True)
 	ref=load_map(selected[0][1])
 	preview=lambda m:bool(m.meta.get('ov_hv')) or 'helioviewer' in str(m.meta.get('ov_src','')).lower()
 	unit=str(ref.unit);pol=ref.meta.get('polar')
-	if not preview(ref) and ref.unit is None:raise ValueError(f'{selected[0][1]} has unrecognized BUNIT={ref.meta.get("bunit")!r}. Use prepared FITS with a known BUNIT.')
+	msb=str(ref.meta.get('bunit','')).replace(' ','').lower() in ('msb','bsun','b_sun','meansolarbrightness')  # e.g. Metis L2: sunpy has no MSB unit
+	# Metis MSB (~1e-10) in units of 1e-12 MSB: flow() floors its feature scale at 1 input unit.
+	gain=1e12 if msb and spacecraft=='SOLO' else 1.
+	if not preview(ref) and ref.unit is None and not msb:raise ValueError(f'{selected[0][1]} has unrecognized BUNIT={ref.meta.get("bunit")!r}. Use prepared FITS with a known BUNIT.')
 	if max(ref.data.shape)>npix:ref=ref.resample([npix,npix]*u.pix)
 	if np.abs(ref.rotation_matrix-np.eye(2)).max()>1e-3:ref=ref.rotate()
 	yy,xx=np.indices(ref.data.shape)
@@ -259,7 +267,7 @@ def _build_cache(key,selected,previous,base,detector,spacecraft,max_gap,npix,r_i
 		from astropy.coordinates import SkyCoord
 		w=SkyCoord(coords.Tx,coords.Ty,frame=m.coordinate_frame)
 		sx,sy=m.world_to_pixel(w)
-		img=ndi.map_coordinates(np.asarray(m.data,dtype='float32'),[sy.value,sx.value],order=1,mode='constant',cval=np.nan)
+		img=ndi.map_coordinates(np.asarray(m.data,dtype='float32')*gain,[sy.value,sx.value],order=1,mode='constant',cval=np.nan)
 		valid=np.isfinite(img)&valid0
 		obs={}
 		if spacecraft:

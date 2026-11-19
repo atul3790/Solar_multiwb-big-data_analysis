@@ -29,6 +29,13 @@ Differences from motion_frame_pipeline.make_frames (which is left unchanged):
   or flow); the cache's noise model is switched to noise_model first.
 V1 caches are named V1_<craft|LASCO>_<detector>_* so the original launchers'
 caches are never modified.
+mission='SOLO': Solar Orbiter Metis (instrument 'VLD' visible light or 'UVD'
+Lyman-alpha; spacecraft='SOLO') from STEREO_imgfolder=<root>/<product>/maps, the
+EUI disk from EUVI_fold=<root>/<product> with EUVI_wave 174/304. Downloads go
+through get_Metis_imgs/get_SolO_imgs; no Helioviewer route. r_inner/r_outer None
+use the Metis header field (INN_FOV/OUT_FOV) with a 5%/3% margin.
+STIX_folder: folder for Multiwb_datamine.get_STIX_LC (CSV reused when present);
+its stix_band light curve is overplotted in red with GOES. None: no STIX.
 """
 from pathlib import Path
 import tempfile,json
@@ -65,7 +72,7 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	SDO_instrument=None, SDO_product=None, SDO_dT=None, spacecraft=None,
 	instrument=None, STEREO_imgfolder=None, polar=None, EUVI_fold=None,
 	EUVI_wave=None, EUVI_dT=None, detect_smooth_px=1.5, bright_contrast_snr=False,
-	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None, flow_input='intensity', flow_bin='auto', colorbar_style='discrete', speed_limits='auto', use_CDAW_pngs=False):
+	region_min_width_rsun=0., region_max_aspect=None, AR_loop_reach_deg=None, flow_input='intensity', flow_bin='auto', colorbar_style='discrete', speed_limits='auto', use_CDAW_pngs=False, STIX_folder=None, stix_band='4-10 keV'):
 	"""Prepare and render one event using settings from its launcher (V1 options in the module docstring)."""
 	check_flow_input(flow_input)
 	if flow_bin!='auto' and int(flow_bin)<1:raise ValueError("flow_bin must be 'auto' or a positive integer.")
@@ -75,16 +82,16 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	if Time(eT)<=Time(sT) or Time(base_diff_DT)>Time(sT) or dT<=0:
 		raise ValueError('Require eT > sT, base_diff_DT <= sT, and positive dT.')
 	mode=mission.upper()
-	if mode not in ('LASCO','STEREO'):raise ValueError('mission must be LASCO or STEREO.')
+	if mode not in ('LASCO','STEREO','SOLO'):raise ValueError('mission must be LASCO, STEREO or SOLO.')
 	detector=(LASCO if mode=='LASCO' else instrument).upper()
-	limits={'C2':(2.2,6.),'C3':(4.,30.),'COR1':(1.5,4.),'COR2':(2.5,15.)}
-	if detector not in (('C2','C3') if mode=='LASCO' else ('COR1','COR2')):
+	limits={'C2':(2.2,6.),'C3':(4.,30.),'COR1':(1.5,4.),'COR2':(2.5,15.),'VLD':(None,None),'UVD':(None,None)}
+	if detector not in {'LASCO':('C2','C3'),'STEREO':('COR1','COR2'),'SOLO':('VLD','UVD')}[mode]:
 		raise ValueError('Detector does not match mission.')
-	craft=None if mode=='LASCO' else spacecraft.upper()
-	if craft not in (None,'A','B'):raise ValueError('spacecraft must be A or B.')
+	craft=None if mode=='LASCO' else 'SOLO' if mode=='SOLO' else spacecraft.upper()
+	if craft not in (None,'A','B','SOLO'):raise ValueError('spacecraft must be A or B.')
 	lo=limits[detector][0] if r_inner is None else r_inner
 	hi=limits[detector][1] if r_outer is None else r_outer
-	if not 0<=lo<hi:raise ValueError('Require 0 <= r_inner < r_outer.')
+	if lo is not None and hi is not None and not 0<=lo<hi:raise ValueError('Require 0 <= r_inner < r_outer.')
 	folder=source(LASCO_imgfolder if mode=='LASCO' else STEREO_imgfolder)
 	model=source(pfss_dir)
 	if pfss_needed and model is None:raise ValueError('Set pfss_dir.')
@@ -116,6 +123,14 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	if download and not use_CDAW_pngs:
 		fill_coronagraph(folder,detector,craft,sT,eT,dT,base_diff_DT,reference_lookback,
 			max_image_dt,need_LASCO_calib,polar,helioviewer)
+	if lo is None or hi is None:  # Metis: field from the header (degrees) in Rsun
+		from motion_inputs import inventory
+		rows=inventory(folder,detector,craft)
+		if not rows:raise FileNotFoundError(f'No Metis {detector} FITS under {folder}.')
+		h=rows[0][2];deg=3600./float(h['RSUN_ARC'])
+		lo=float(h['INN_FOV'])*deg*1.05 if lo is None else lo
+		hi=float(h['OUT_FOV'])*deg*.97 if hi is None else hi
+		print(f'Metis field: r_inner={lo:.2f}, r_outer={hi:.2f} Rsun',flush=True)
 	# Science FITS if they cover every cadence slot; otherwise Helioviewer maps_HV.
 	# Route Level-1 -> Helioviewer -> Level-0.5 (STEREO always; LASCO when
 	# need_LASCO_calib is True). need_LASCO_calib=False keeps Level-0.5 first.
@@ -135,11 +150,11 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 	if download:
 		disk_folder=source(EUVI_fold if craft else SDO_fold)
 		if disk_folder is not None:
-			fill_disk(disk_folder,'EUVI' if craft else SDO_instrument,
+			fill_disk(disk_folder,'EUI' if craft=='SOLO' else 'EUVI' if craft else SDO_instrument,
 				EUVI_wave if craft else SDO_product,load_map(motion_cache/'reference_grid.fits'),
 				craft,sT,eT,EUVI_dT if craft else SDO_dT,disk_max_minutes,helioviewer)
 	disk_folder=source(EUVI_fold if craft else SDO_fold)
-	if disk_folder is not None:
+	if disk_folder is not None and craft!='SOLO':
 		ensure_hv_disk(disk_folder,'EUVI' if craft else SDO_instrument,
 			EUVI_wave if craft else SDO_product,load_map(motion_cache/'reference_grid.fits'),
 			craft,sT,eT,EUVI_dT if craft else SDO_dT,disk_max_minutes)
@@ -150,6 +165,12 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 				dict(rss=rss,nrho=nrho,r_seed=r_seed,n_lon=n_lon,n_lat=n_lat))
 		if not pfss_models and not any((p.parent/'metadata.json').is_file() for p in model.rglob('field_lines.npz')):
 			raise FileNotFoundError(f'No saved PFSS model in {model}.')
+	stix_csv=None
+	if STIX_folder:  # STIX quick-look light curve (Earth light-arrival time), red overplot with GOES
+		import Multiwb_datamine as dm
+		tag=lambda x:Time(x).strftime('%Y%m%dT%H%M%S')
+		stix_csv=source(STIX_folder)/f'STIX_QL_{tag(sT)}-{tag(eT)}.csv'
+		if not stix_csv.is_file():stix_csv=dm.get_STIX_LC(sT,eT,outdir=source(STIX_folder))[1]
 	frames=source(final_image_folder) if final_image_folder else dest/'frames'
 	render_frames(motion_cache,
 		panel_keys=panels,
@@ -227,7 +248,9 @@ def make_frames_V1(mission,*, noise_model='ring', ring_step_rsun=1., ring_streng
 		arrow_min_area=arrow_min_area,
 		detect_floor=detect_floor,
 		max_gap_seconds=max_gap_seconds,
-		dpi=dpi)
+		dpi=dpi,
+		stix_csv=stix_csv,
+		stix_band=stix_band)
 	record_flow_input(frames,flow_input,resolve_flow_bin(motion_cache,flow_bin))
 	return motion_cache
 

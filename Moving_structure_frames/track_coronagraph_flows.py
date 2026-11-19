@@ -80,8 +80,8 @@ def write_mp4(paths,destination):
 		output.replace(destination)
 
 def is_stereo_grid(m):
-	"""COR1, COR2 or the combined COR2+HI1 grid."""
-	return str(m.detector).upper() in ('COR1','COR2','COR2+HI1')
+	"""Off-Earth coronagraph grid with per-exposure observer: COR1, COR2, COR2+HI1 or Solar Orbiter Metis (VLD/UVD)."""
+	return str(m.detector).upper() in ('COR1','COR2','COR2+HI1','VLD','UVD')
 
 def frame_map(ref,t,item):
 	"""Keep the flow grid fixed; assign STEREO geometry from this exposure."""
@@ -160,7 +160,7 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	pfss_needed, pfss_models, disk_max_minutes, bright_border, dark_border, new_border, border_width,
 	n_open, n_global_closed, n_closed, ar_half_lon, ar_half_lat, ar_half_box_arcsec, spoke_pa,
 	spoke_halfwidth, spoke_arrow_buffer_deg, mask_buffer_px, detect_sigma, detect_min_area, region_span_rsun, weak_bright_factor,
-	flow_support_radius_rsun, bright_contrast, bright_min_area, arrow_min_area, detect_floor, max_gap_seconds, dpi, colorbar_style='discrete', speed_limits='auto'):
+	flow_support_radius_rsun, bright_contrast, bright_min_area, arrow_min_area, detect_floor, max_gap_seconds, dpi, colorbar_style='discrete', speed_limits='auto', stix_csv=None, stix_band='4-10 keV'):
 	"""Render aligned motion products using settings supplied by the task script.
 
 	n_AR_open: maximum number of open AR field lines (magenta) drawn, spread evenly
@@ -191,6 +191,9 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	boundaries or 'auto' = SPEED_LADDER up to the fastest vector) or 'continuous'
 	(speed_limits 'auto' = 0 to the fastest vector rounded up, or (vmin, vmax)).
 	One colour axis for all frames; the fastest drawn vector in sT-eT sets 'auto'.
+	stix_csv: CSV from Multiwb_datamine.get_STIX_LC; its stix_band column (default
+	4-10 keV, the STIX band of GOES XRS-B 1-8 A) is overplotted in red on its own
+	log axis (counts/s, 1-min means) in the light-curve panel. None draws no STIX.
 	"""
 	rooted=ar_seed_spacing_deg is not None
 	if rooted:
@@ -211,7 +214,7 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	stereo=is_stereo_grid(ref)
 	if not stereo and str(ref.detector).upper()!=LASCO.upper():
 		raise ValueError(f'LASCO={LASCO} does not match the cached {ref.detector} grid.')
-	folder,instr,product=(EUVI_fold,'EUVI',EUVI_wave) if stereo else (SDO_fold,SDO_instrument,SDO_product)
+	folder,instr,product=(EUVI_fold,'EUI' if 'ORBITER' in str(ref.observatory).upper() else 'EUVI',EUVI_wave) if stereo else (SDO_fold,SDO_instrument,SDO_product)  # EUVI_fold/EUVI_wave hold EUI for Solar Orbiter
 	inventory=disk_inventory(folder,instr,product,ref)
 	if not inventory and folder is not None and instr.upper()=='HMI':
 		inventory=disk_inventory(motion_cache,instr,product,ref)
@@ -358,6 +361,11 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 	lat=pd.read_csv(lat_csv)
 	for column,default in (('flux_error_lower',lat.get('flux_error',0.)),('flux_error_upper',lat.get('flux_error',0.)),('is_upper_limit',False),('time_error_seconds',0.)):
 		if column not in lat:lat[column]=default
+	stix=None
+	if stix_csv is not None:
+		stix=pd.read_csv(stix_csv);stix['datetime']=pd.to_datetime(stix['datetime'],utc=True,format='mixed')
+		if stix_band not in stix:raise ValueError(f'{stix_csv} has no {stix_band!r} column; choose one of {[c for c in stix if "keV" in c]}.')
+		stix_1min=stix.set_index('datetime')[stix_band].resample('1min').mean()  # 1-min means of the 4-s quick-look counts
 	for table in (goes,lat):table['datetime']=pd.to_datetime(table['datetime'],utc=True,format='mixed')
 	frames=[];all_rows=[];region_rows=[];centroid_rows=[];centroids={};prior=None;prior_time=None
 	for path in sorted(motion_cache.glob('structures_*.npz')):
@@ -548,6 +556,11 @@ def render_frames(motion_cache,*, plot_style=None, pfss_linewidth=1.5, base_regi
 			_m=hi/e10(hi);lc.set_ylim((5 if lo/e10(lo)>=5 else 1)*e10(lo),(1 if _m<=1 else 5 if _m<=5 else 10)*e10(hi))
 		else:lc.set_ylim(1e-8,1e-4)
 		rt.set(yscale='log',ylabel='GOES SXR flux\n(W m⁻²)')
+		if stix is not None:  # STIX in red on a third log axis (counts/s)
+			sx=lc.twinx();sx.spines['right'].set_position(('axes',1.17))
+			sx.plot(stix_1min.index,stix_1min.where(stix_1min>0),color='red',lw=1.1)
+			sx.set_yscale('log');sx.set_ylabel(f'STIX {stix_band}\n(counts s⁻¹)',color='red',fontsize=style('ylabel_size',18))
+			sx.tick_params(axis='y',colors='red',labelsize=style('ytick_size',15));sx.spines['right'].set_color('red')
 		lc.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
 		lc.grid(alpha=.2)
 		lc.text(.02,.98,'(b)',transform=lc.transAxes,va='top',fontsize=style('xlabel_size',18),bbox=dict(facecolor='white',edgecolor='none',pad=1))
