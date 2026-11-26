@@ -1,10 +1,10 @@
 """Solar Orbiter overlay frames: Metis running difference with EUI inside the occulter, a magnified EUI panel and STIX/GOES light curves, plus a movie.
 
-Each frame, left: Metis VL total-brightness running difference (image minus the
-previous Metis image) outside the Metis occulter, and the EUI Full Sun Imager
-intensity image nearest in time filling the region inside it; right: that EUI
-image magnified (+-zoom_rsun) to show the source region, as intensity or, with
-eui_rdiff=1, as a running difference over the same image pair as Metis.
+Each frame, left: Metis VL total brightness outside the Metis occulter, and the EUI Full Sun
+Imager intensity image nearest in time filling the region inside it; right: that EUI image
+magnified (+-zoom_rsun, or a zoom_box that can follow solar rotation) to show the source
+region. Each panel is chosen separately (metis_mode, eui_mode) as running difference, base
+difference (base_time) or intensity.
 Lower panel (lc_panel=1): STIX quick-look bands (stix_bands; Multiwb_datamine.get_STIX_LC)
 and GOES XRS-B (goes_cache.resolve_goes_pickle) for the whole window, all in Earth
 light-arrival UT; a dotted line marks each frame, its Metis time shifted from Solar
@@ -34,10 +34,12 @@ from astropy.io import fits
 from astropy.time import Time
 from astropy.coordinates import SkyCoord
 from astropy.visualization import ImageNormalize,AsinhStretch
+from matplotlib.colors import LogNorm
 import sunpy.map
 from sunpy.map.header_helper import make_fitswcs_header
 from sunpy.visualization import colormaps as _sunpy_cmaps  # registers 'solar orbiterfsi174'
 from scipy.ndimage import map_coordinates
+from sunpy.coordinates import propagate_with_solar_surface
 import datamine_calib_helper as dh
 import matplotlib.dates as mdates
 import pandas as pd
@@ -48,18 +50,25 @@ from track_coronagraph_flows import write_mp4
 
 # Parameter guide
 # basedir    : event folder; every relative path below is inside it.
-# outdir     : frame folder (the movie is saved in it).
+# outdir     : frame folder stem; frames and movie go to <outdir>_<metis_mode>-<eui_mode>/.
 # metis_dir  : Metis L2 FITS folder (e.g. from Multiwb_datamine.get_Metis_imgs).
 # eui_dir    : EUI FITS folder; nearest missing files are downloaded here.
-# sT,eT      : UTC window of Metis images; the first image only serves as reference.
+# sT,eT      : UTC window of Metis images; with an 'rdiff' panel the first image is only the reference.
 # eui_product: SOAR descriptor, 'eui-fsi174-image' or 'eui-fsi304-image'.
 # eui_maxdt  : largest allowed Metis-EUI time difference [s]; else no EUI in the frame.
 # npix       : output grid size (square); half-width is the Metis outer field edge.
 # diff_clip  : percentile of |difference| over all frames that sets the grey limits.
 # zoom_rsun  : half-width of the magnified EUI panel, solar radii.
-# eui_rdiff  : 0 = EUI intensity in the magnified panel; 1 = EUI running difference there
-#              (this EUI image minus the one matched to the previous Metis image, same
-#              pair as Metis). Frames then go to <outdir>_EUIrdiff, so both sets are kept.
+# zoom_box   : None, or [x0,x1,y0,y1] Solar X/Y box in solar radii for panel (b) instead of
+#              +-zoom_rsun (e.g. a tall box around chosen active regions).
+# zoom_track : 1 = the zoom_box is set at the first frame and its centre then follows solar
+#              differential rotation (box size fixed); 0 = box fixed in Solar X/Y.
+# metis_mode : panel (a) Metis tB: 'rdiff' (running difference), 'bdiff' (base difference) or
+#              'intensity' (log scale).
+# eui_mode   : panel (b) EUI: 'rdiff', 'bdiff' or 'intensity'. Differences use the EUI images
+#              matched to the same Metis pair (rdiff) or base image (bdiff).
+# base_time  : UTC of the base image for 'bdiff' (nearest Metis image; EUI matched to it);
+#              None = first Metis image in sT-eT.
 # lc_panel   : 1 adds the STIX + GOES light-curve panel below the images; 0 omits it.
 # stix_dir   : STIX quick-look folder (Multiwb_datamine.get_STIX_LC; CSV for sT-eT reused).
 # stix_bands : STIX bands to draw, from '4-10 keV', '10-15 keV', '15-25 keV', '25-50 keV',
@@ -67,17 +76,21 @@ from track_coronagraph_flows import write_mp4
 # goes_folder: GOES pickle cache (plot_goes_derivative); downloaded if no file covers sT-eT.
 ########### INPUT ###########################################################
 basedir='/path/to/event_folder'  # Event folder: all relative paths below live inside it
-outdir='SolO/Metis_EUI_rdiff_frames'
+outdir='SolO/Metis_EUI_frames'
 metis_dir='SolO/Metis/metis_tb'
 eui_dir='SolO/EUI/fsi174'
-sT='YYYY-MM-DDThh:mm:ss'  # Event start, UTC
-eT='YYYY-MM-DDThh:mm:ss'  # Event end, UTC
+sT='2025-05-30T07:00:00'
+eT='2025-05-31T00:00:00'
 eui_product='eui-fsi174-image'
 eui_maxdt=900
 npix=1000
 diff_clip=99.
 zoom_rsun=1.6
-eui_rdiff=0
+zoom_box=None
+zoom_track=0
+metis_mode='rdiff'
+eui_mode='intensity'
+base_time=None
 lc_panel=1
 stix_dir='SolO/STIX'
 stix_bands=['4-10 keV','15-25 keV','25-50 keV']
@@ -127,8 +140,8 @@ def to_grid(m,hdr):
 	return map_coordinates(np.asarray(m.data,float),[sy.value,sx.value],order=1,mode='constant',cval=np.nan)
 
 def extent_rsun(meta,rsun_arcsec):
-	"""imshow extent (x0,x1,y0,y1) in solar radii of a north-up grid centred on the Sun (CRVAL=0)."""
-	e=lambda k:[((v-meta[f'crpix{k}'])*meta[f'cdelt{k}'])/rsun_arcsec for v in (.5,meta[f'naxis{k}']+.5)]
+	"""imshow extent (x0,x1,y0,y1) in solar radii of a north-up helioprojective grid (CRVAL in arcsec)."""
+	e=lambda k:[((v-meta[f'crpix{k}'])*meta[f'cdelt{k}']+meta.get(f'crval{k}',0))/rsun_arcsec for v in (.5,meta[f'naxis{k}']+.5)]
 	return e(1)+e(2)
 
 def hgs_grid(ax,frame,rsun_arcsec,step=15):
@@ -154,37 +167,58 @@ def light_curves(sT,eT,stix_dir,stix_bands,goes_folder):
 	goes=pd.DataFrame(dict(flux=np.asarray(g['Flux'],float)),index=pd.to_datetime(g['Time'],utc=True))
 	return stix,goes
 
-def make_frames(mfiles,efiles,outdir,npix=1000,diff_clip=99.,zoom_rsun=1.6,eui_rdiff=False,lc=None,lc_window=None):
-	"""Write one PNG per Metis image after the first; returns the PNG paths.
+LABEL={'rdiff':'running diff.','bdiff':'base diff.'}
+
+def make_frames(mfiles,efiles,outdir,npix=1000,diff_clip=99.,zoom_rsun=1.6,eui_mode='intensity',lc=None,lc_window=None,zoom_box=None,zoom_track=False,metis_mode='rdiff',base=0):
+	"""Write one PNG per Metis image (after the first if a panel is 'rdiff'); returns the PNG paths.
 	mfiles: time-sorted Metis FITS; efiles: matching EUI FITS or None (same length).
-	Left: Metis running difference outside the occulter with EUI inside. Right: EUI
-	magnified to +-zoom_rsun solar radii, to see the source region; eui_rdiff=True shows
-	there the EUI running difference over the same pair as Metis (grey, +-diff_clip limits).
-	lc: (stix, goes) from light_curves for a lower panel over lc_window=(sT,eT); None omits it."""
+	Left: Metis outside the occulter with EUI intensity inside. Right: EUI magnified to
+	+-zoom_rsun solar radii, to see the source region.
+	metis_mode (panel a) and eui_mode (panel b): 'rdiff' = minus the previous image, 'bdiff' =
+	minus the base image mfiles[base] (EUI: efiles[base]), 'intensity' (Metis log grey, EUI asinh).
+	Difference grey limits are +-the diff_clip percentile of |difference| over all frames.
+	lc: (stix, goes) from light_curves for a lower panel over lc_window=(sT,eT); None omits it.
+	zoom_box: [x0,x1,y0,y1] in solar radii for the magnified panel instead of +-zoom_rsun.
+	zoom_track: move the zoom_box centre with solar differential rotation from the first frame.
+	"""
+	for m in (metis_mode,eui_mode):
+		if m not in ('rdiff','bdiff','intensity'):raise ValueError(f"panel mode {m!r}: use 'rdiff', 'bdiff' or 'intensity'")
 	Path(outdir).mkdir(parents=True,exist_ok=True)
-	frames=[];ref=None  # ref: first magnified EUI intensity, sets the EUI stretch
-	prev=load_metis(mfiles[0])
-	for mf,ef,ep in zip(mfiles[1:],efiles[1:],efiles[:-1]):
+	frames=[];ref=None;c0=None  # ref: first magnified EUI intensity, sets the EUI stretch
+	i0=1 if 'rdiff' in (metis_mode,eui_mode) else 0
+	M0,eb=load_metis(mfiles[base]),efiles[base]
+	prev,ep=(load_metis(mfiles[0]),efiles[0]) if i0 else (None,None)
+	for mf,ef in zip(mfiles[i0:],efiles[i0:]):
 		cur=load_metis(mf)
 		hdr=frame_grid(cur,npix)
-		diff=sunpy.map.Map(to_grid(cur,hdr)-to_grid(prev,hdr),hdr)
-		eui=zoom=None
+		mr={'rdiff':prev,'bdiff':M0}.get(metis_mode)
+		diff=sunpy.map.Map(to_grid(cur,hdr)-(to_grid(mr,hdr) if mr is not None else 0),hdr)
+		eui=zoom=er=None
 		if ef:
 			e=sunpy.map.Map(ef)
-			half=zoom_rsun*cur.rsun_obs.to_value(u.arcsec)
-			zh=make_fitswcs_header((700,700),SkyCoord(0*u.arcsec,0*u.arcsec,frame=cur.coordinate_frame),scale=[2*half/700]*2*u.arcsec/u.pix,rotation_angle=0*u.deg)
+			rsa=cur.rsun_obs.to_value(u.arcsec);x0,x1,y0,y1=zoom_box if zoom_box else (-zoom_rsun,zoom_rsun,-zoom_rsun,zoom_rsun)
+			if zoom_box and zoom_track:  # box centre follows the solar surface from the first frame
+				if c0 is None:c0=SkyCoord((x0+x1)/2*rsa*u.arcsec,(y0+y1)/2*rsa*u.arcsec,frame=cur.coordinate_frame).make_3d()
+				with propagate_with_solar_surface():c=c0.transform_to(cur.coordinate_frame)
+				dx,dy=c.Tx.to_value(u.arcsec)/rsa-(x0+x1)/2,c.Ty.to_value(u.arcsec)/rsa-(y0+y1)/2
+				x0,x1,y0,y1=x0+dx,x1+dx,y0+dy,y1+dy
+			sc=(y1-y0)*rsa/700;shape=(700,int(round(700*(x1-x0)/(y1-y0))))
+			zh=make_fitswcs_header(shape,SkyCoord((x0+x1)/2*rsa*u.arcsec,(y0+y1)/2*rsa*u.arcsec,frame=cur.coordinate_frame),scale=[sc]*2*u.arcsec/u.pix,rotation_angle=0*u.deg)
 			zd=to_grid(e,zh)
 			if ref is None:ref=zd.copy()
-			if eui_rdiff:zd=zd-to_grid(sunpy.map.Map(ep),zh) if ep else np.full_like(zd,np.nan)
+			er={'rdiff':ep,'bdiff':eb}.get(eui_mode)
+			if eui_mode!='intensity':zd=zd-to_grid(sunpy.map.Map(er),zh) if er else np.full_like(zd,np.nan)
 			zoom=sunpy.map.Map(zd,zh)
 			k=int(max(1,np.floor(hdr['cdelt1']/e.scale.axis1.to_value(u.arcsec/u.pix))))
 			if k>1:e=e.superpixel([k,k]*u.pix,func=np.nanmean)
 			eui=sunpy.map.Map(to_grid(e,hdr),hdr)
-		frames.append((cur.date,prev.date,diff,eui,zoom,ef,ep))
-		prev=cur
-	lim=np.nanpercentile(np.abs(np.concatenate([f[2].data[np.isfinite(f[2].data)] for f in frames])),diff_clip)
+		frames.append((cur.date,mr.date if mr is not None else None,diff,eui,zoom,ef,er))
+		prev,ep=cur,ef
+	allv=np.concatenate([f[2].data[np.isfinite(f[2].data)] for f in frames])
+	lim=np.nanpercentile(np.abs(allv),diff_clip)
+	mn=None if metis_mode!='intensity' else LogNorm(*np.nanpercentile(allv[allv>0],[100-diff_clip,diff_clip]),clip=False)
 	en=None
-	if eui_rdiff:
+	if eui_mode!='intensity':
 		zv=[f[4].data[np.isfinite(f[4].data)] for f in frames if f[4] is not None]
 		zlim=np.nanpercentile(np.abs(np.concatenate(zv)),diff_clip) if zv else 1.
 	clear=lambda name:plt.get_cmap(name).with_extremes(bad=(0,0,0,0))
@@ -194,30 +228,32 @@ def make_frames(mfiles,efiles,outdir,npix=1000,diff_clip=99.,zoom_rsun=1.6,eui_r
 		if ylabel:a.set_ylabel(r'Solar Y ($R_\odot$)',fontsize=fs['label'])
 		a.tick_params(labelsize=fs['tick']);a.set_aspect('equal')
 	paths=[]
-	for t,tp,diff,eui,zoom,ef,ep in frames:
+	for t,tp,diff,eui,zoom,ef,er in frames:
 		rs=diff.rsun_obs.to_value(u.arcsec)
-		fig=plt.figure(figsize=(15,11 if lc else 7.8))
-		gs=fig.add_gridspec(2 if lc else 1,2,height_ratios=[4,1.6] if lc else [1],hspace=.32,wspace=.22)
+		wr=[1,(zoom_box[1]-zoom_box[0])/(zoom_box[3]-zoom_box[2])] if zoom_box else [1,1]
+		fig=plt.figure(figsize=(7.5*(1+wr[1]),11 if lc else 7.8))
+		gs=fig.add_gridspec(2 if lc else 1,2,height_ratios=[4,1.6] if lc else [1],width_ratios=wr,hspace=.32,wspace=.3 if zoom_box else .22)
 		ax=fig.add_subplot(gs[0,0]);E=extent_rsun(diff.meta,rs)
 		ax.set_facecolor('black')
 		if ref is not None and en is None:
 			v=ref[np.isfinite(ref)&(ref>0)]
 			en=ImageNormalize(vmin=np.percentile(v,2),vmax=np.percentile(v,99.9),stretch=AsinhStretch(0.01),clip=False)  # clip=True would paint masked pixels
 		if eui is not None:ax.imshow(np.ma.masked_invalid(eui.data),origin='lower',extent=E,cmap=clear('solar orbiterfsi174'),norm=en)
-		ax.imshow(np.ma.masked_invalid(diff.data),origin='lower',extent=E,cmap=clear('gray'),vmin=-lim,vmax=lim)
+		ax.imshow(np.ma.masked_invalid(diff.data),origin='lower',extent=E,cmap=clear('gray'),**(dict(vmin=-lim,vmax=lim) if metis_mode!='intensity' else dict(norm=mn)))
 		ax.add_patch(plt.Circle((0,0),1,fill=False,color='w',lw=.6,alpha=.6));style(ax)
-		ax.set_title(f'(a) Metis tB running diff. {t.isot[11:16]}−{tp.isot[11:16]} UT\n+ EUI inside the occulter',fontsize=fs['title'])
+		ax.set_title((f'(a) Metis tB {t.isot[11:19]} UT' if metis_mode=='intensity' else f'(a) Metis tB {LABEL[metis_mode]} {t.isot[11:16]}−{tp.isot[11:16]} UT')+'\n+ EUI inside the occulter',fontsize=fs['title'])
 		bx=fig.add_subplot(gs[0,1]);bx.set_facecolor('black')
 		if zoom is not None:
 			Z=extent_rsun(zoom.meta,rs);band=f'EUI {eui_product.split("fsi")[1][:3]} Å'
-			if eui_rdiff:
+			if eui_mode!='intensity':
 				bx.imshow(np.ma.masked_invalid(zoom.data),origin='lower',extent=Z,cmap=clear('gray'),vmin=-zlim,vmax=zlim)
-				title=f'(b) {band} running diff. {sunpy.map.Map(ef).date.isot[11:16]}−{sunpy.map.Map(ep).date.isot[11:16] if ep else "none"} UT'
+				title=f'(b) {band} {LABEL[eui_mode]} {sunpy.map.Map(ef).date.isot[11:16]}−{sunpy.map.Map(er).date.isot[11:16] if er else "none"} UT'
 			else:
 				bx.imshow(np.ma.masked_invalid(zoom.data),origin='lower',extent=Z,cmap=clear('solar orbiterfsi174'),norm=en)
 				title=f'(b) {band} {sunpy.map.Map(ef).date.isot[11:19]} UT'
 			hgs_grid(bx,zoom.coordinate_frame,rs)
 			bx.set_xlim(Z[:2]);bx.set_ylim(Z[2:])
+			if zoom_box:title=title.replace(' diff. ',' diff.\n')
 			bx.set_title(title,fontsize=fs['title'])
 		else:bx.set_title('(b) no EUI image within eui_maxdt',fontsize=fs['title'])
 		style(bx)
@@ -240,7 +276,7 @@ def make_frames(mfiles,efiles,outdir,npix=1000,diff_clip=99.,zoom_rsun=1.6,eui_r
 			lx.text(.01,.95,'(c)',transform=lx.transAxes,va='top',fontsize=fs['title'])
 			h1,l1=lx.get_legend_handles_labels();h2,l2=rx.get_legend_handles_labels()
 			lx.legend(h1+h2,l1+l2,loc='upper center',bbox_to_anchor=(.5,1.22),fontsize=fs['legend'],ncol=len(l1)+1,frameon=False)
-		p=os.path.join(outdir,f'Metis_EUI_rdiff_{t.strftime("%Y%m%d_%H%M%S")}.png')
+		p=os.path.join(outdir,f'Metis_EUI_{metis_mode}-{eui_mode}_{t.strftime("%Y%m%d_%H%M%S")}.png')
 		fig.savefig(p,dpi=110,bbox_inches='tight');plt.close(fig)
 		paths.append(p)
 	return paths
@@ -254,11 +290,12 @@ if __name__=='__main__':
 		print(f'{len(mfiles)} Metis images in {sT} -- {eT}')
 		efiles=get_eui([dh._hdr_time(p) for p in mfiles],eui_dir,eui_product,eui_maxdt)
 		print(f'{sum(e is not None for e in efiles)} frames have an EUI image within {eui_maxdt} s')
-		out=outdir+('_EUIrdiff' if eui_rdiff else '')
+		out=f'{outdir}_{metis_mode}-{eui_mode}'
+		base=0 if base_time is None else int(np.argmin([abs((dh._hdr_time(p)-Time(base_time)).to_value(u.s)) for p in mfiles]))
 		lc=light_curves(sT,eT,stix_dir,stix_bands,goes_folder) if lc_panel else None
-		paths=make_frames(mfiles,efiles,out,npix,diff_clip,zoom_rsun,bool(eui_rdiff),lc,(sT,eT))
+		paths=make_frames(mfiles,efiles,out,npix,diff_clip,zoom_rsun,eui_mode,lc,(sT,eT),zoom_box,bool(zoom_track),metis_mode,base)
 		print(f'{len(paths)} frames in {out}')
-		mp4=Path(out)/('Metis_tB_rdiff_EUI'+eui_product.split('fsi')[1][:3]+('rdiff' if eui_rdiff else '')+'.mp4')
+		mp4=Path(out)/(f'Metis_tB{metis_mode}_EUI'+eui_product.split('fsi')[1][:3]+eui_mode+('_zoomtrack' if zoom_box and zoom_track else '_zoombox' if zoom_box else '')+'.mp4')
 		write_mp4(paths,mp4);print(f'Saved MP4 of {len(paths)} frames: {mp4}')
 	finally:
 		os.chdir(cwd)

@@ -5,7 +5,9 @@ Frame and movie makers for following coronal mass ejections and other moving str
 Two families of runnable scripts share one set of modules:
 
 - **Moving-structure (flow) frames** detect connected bright and dark structures in base-difference and running-difference images, measure their in-plane drift with TV-L1 optical flow, and draw contour and centroid drift arrows. The result is a diagnostic movie of how structures form, flow out and merge.
-- **Overlay frames** draw difference images from LASCO, STEREO or PSP/WISPR with PFSS field lines projected from that spacecraft's viewpoint, plus the light curves.
+- **Overlay frames** come in two kinds:
+  - PFSS overlays: difference images from LASCO, STEREO or PSP/WISPR with PFSS field lines projected from that spacecraft's viewpoint, plus LAT/GOES light curves.
+  - Coronagraph + EUV overlays: a coronagraph with an EUV image filling its occulter, beside a full-disk or magnified EUV panel. Below them is a STIX + GOES panel covering the whole window, with a line marking each frame's time. The pairs are Solar Orbiter Metis + EUI, SOHO/LASCO + SDO/AIA and STEREO COR2 + EUVI.
 
 The drift arrows are an image-plane proxy for pattern speed. Projection effects and detection uncertainties remain, and they are not plasma velocities.
 
@@ -18,6 +20,7 @@ Image download and preparation come from the companion repository **[Solar_data_
 - [Runnable scripts](#runnable-scripts)
 - [How a flow run works](#how-a-flow-run-works)
 - [Modules](#modules)
+- [Coronagraph + EUV overlay makers: functions](#coronagraph--euv-overlay-makers-functions)
 - [Key settings](#key-settings)
 - [Outputs](#outputs)
 - [Example](#example)
@@ -57,7 +60,10 @@ Each event study uses one `basedir`. Every relative path in the launchers' INPUT
   SolO/EUI/<product>/raw/        Solar Orbiter EUI Level 2 (fsi174, fsi304)
   SolO/STIX/                     STIX quick-look light-curve CSVs (raw/ holds the daily SOAR files)
   SolO_LAT_frames/               same for Solar Orbiter Metis runs
-  SolO/Metis_EUI_rdiff_frames[_EUIrdiff]/  make_SolO_overlay_frames output
+  SolO/Metis_EUI_frames_<metis_mode>-<eui_mode>/  make_SolO_overlay_frames output
+  SDO/AIA/<wave>_synoptic/       JSOC AIA synoptic FITS (1k, 2-min) fetched by make_AIA_LASCO_overlay_frames
+  LASCO_AIA_frames/<stem>_<a>[-<b>]/  make_AIA_LASCO_overlay_frames output
+  STEREO_EUVI_frames/<stem>_<a>[-<b>]/  make_STEREO_EUVI_overlay_frames output
   PSP_WISPR_LAT_frames/
 ```
 
@@ -77,7 +83,9 @@ Edit only the INPUT block of a script, then run it with `python script.py` or `%
 | `make_LASCO_overlay_frames.py` | LASCO difference images with HMI/AIA disk, global and AR-focused PFSS lines, and LAT/GOES panels |
 | `make_STEREO_overlay_frames.py` | STEREO COR1/COR2 difference images with EUVI disk and observer-projected PFSS, plus LAT/GOES panels |
 | `make_PSP_WISPR_overlay_frames.py` | PSP/WISPR field of view with a PFSS spherical-shell wireframe and projected field lines, plus LAT/GOES panels |
-| `make_SolO_overlay_frames.py` | Solar Orbiter Metis tB running difference with the EUI image filling the occulter, a magnified EUI panel (intensity, or running difference with `eui_rdiff=1`) and a STIX (`stix_bands`) + GOES panel over the whole window with a line at each frame, all in Earth light-arrival UT. Axes in solar radii; Metis and EUI aligned by helioprojective angle. Metis/EUI/STIX from ESA SOAR. |
+| `make_SolO_overlay_frames.py` | Solar Orbiter Metis tB with the EUI image filling the occulter, a magnified EUI panel and a STIX (`stix_bands`) + GOES panel over the whole window with a line at each frame, all in Earth light-arrival UT. Axes in solar radii; Metis and EUI aligned by helioprojective angle. Metis/EUI/STIX from ESA SOAR. `metis_mode` (panel a) and `eui_mode` (panel b) are each `'rdiff'` (running difference), `'bdiff'` (base difference at `base_time`) or `'intensity'`; `zoom_box=[x0,x1,y0,y1]` (R☉) sets panel (b) to a chosen box, e.g. around active regions, and `zoom_track=1` moves that box with solar differential rotation. |
+| `make_AIA_LASCO_overlay_frames.py` | SOHO/LASCO C2 (or C3) frames with an SDO/AIA full-disk image inside the occulter, a full-disk AIA panel and the same STIX + GOES panel. `panels` lists (panel a, panel b) display pairs, one movie each; each panel is `'rdiff'` (running difference), `'bdiff'` (base difference at `base_time`) or `'intensity'` (folders `<outdir>_<a>` or `<outdir>_<a>-<b>`). AIA images are JSOC synoptic files (1k, 2-min cadence) fetched for each LASCO time; AIA angles are scaled by the solar-radius ratio so the SDO limb lies on the SOHO limb. |
+| `make_STEREO_EUVI_overlay_frames.py` | The same frames for STEREO COR2 with EUVI (`euvi_wave`) inside the occulter and as the full-disk panel, using `make_AIA_LASCO_overlay_frames.make_frames` (names, colormap and titles from the FITS headers). Only full-resolution COR2 images are used, blanked inside `occ_rsun` (occulter and diffraction ring); EUVI is fetched with `get_STEREO_imgs` and matched within `euvi_maxdt`. Same `panels` and `base_time` options. |
 
 ## How a flow run works
 
@@ -137,7 +145,69 @@ Steps 1–3 build the motion cache, which is slow (downloads, alignment and flow
 | `solar_disk_layer.py` | Nearest EUVI, EUI or SDO image, reprojected into the coronagraph grid as a disk underlay | `disk_layer`, `nearest_disk`, `disk_inventory` |
 | `noaa_region.py` | Looks up a NOAA active region's position in the daily SRS reports, downloading them if missing | `find_NOAA_location` |
 
-The four overlay makers are self-contained scripts. They hold their own helpers (image cache scans, observer geometry, AR tracing, light-curve panels) and use `solar_overlay` and `solar_overlay_helper` from Solar_data_mining for PFSS and image compositing.
+The three PFSS overlay makers (`make_LASCO_overlay_frames`, `make_STEREO_overlay_frames`, `make_PSP_WISPR_overlay_frames`) are self-contained scripts. They hold their own helpers (image cache scans, observer geometry, AR tracing, light-curve panels) and use `solar_overlay` and `solar_overlay_helper` from Solar_data_mining for PFSS and image compositing. The three coronagraph + EUV makers are importable modules; they are described in the next section.
+
+## Coronagraph + EUV overlay makers: functions
+
+These three scripts share one design:
+
+- Every image is resampled onto a north-up helioprojective grid seen from the coronagraph's spacecraft, aligned by helioprojective angle (no 3-D reprojection between exposure times, which would blank off-disk pixels). Axes are Solar X/Y in solar radii.
+- Panels (a) and (b) can each be a running difference (`'rdiff'`), a base difference at `base_time` (`'bdiff'`) or `'intensity'`.
+- Grey limits are set by the `diff_clip` percentile of |difference| over all frames, so the contrast is the same in every frame.
+- The STIX + GOES panel is in Earth light-arrival UT. Each frame's time is shifted from the spacecraft to Earth by light travel time before its line is drawn.
+
+Importing any of them only defines the INPUT values and functions, so the functions can be used in your own scripts.
+
+### `make_SolO_overlay_frames.py` (Solar Orbiter Metis + EUI)
+
+| Function | Use |
+|---|---|
+| `metis_files(folder,sT,eT)` | Metis FITS in `folder` whose DATE-OBS lies in [sT, eT], time-sorted. |
+| `load_metis(path)` | Metis image as a SunPy Map; non-positive pixels (occulter, outside the field) become NaN. |
+| `get_eui(times,folder,product,maxdt)` | The SOAR Level 2 EUI file nearest each time (`product` e.g. `'eui-fsi174-image'`), downloaded into `folder` if missing; `None` where none is within `maxdt` s. |
+| `frame_grid(m,npix)` | `npix`² north-up header centred on the Sun, seen from Map `m`'s observer, half-width = the farthest valid Metis pixel. |
+| `to_grid(m,hdr)` | Samples Map `m` on header `hdr` by helioprojective angle; NaN outside `m`. |
+| `extent_rsun(meta,rsun_arcsec)` | `imshow` extent (x0, x1, y0, y1) in solar radii for a north-up header. |
+| `hgs_grid(ax,frame,rsun_arcsec,step=15)` | Draws a Stonyhurst grid (visible hemisphere) in solar radii on `ax`. |
+| `light_curves(sT,eT,stix_dir,stix_bands,goes_folder)` | `(stix, goes)` DataFrames in Earth light-arrival UT: STIX 1-min means of `stix_bands` (reuses `STIX_QL_<sT>-<eT>.csv`, else `Multiwb_datamine.get_STIX_LC`) and GOES XRS-B (`goes_cache.resolve_goes_pickle`). |
+| `make_frames(mfiles,efiles,outdir,npix=1000,`<br>`diff_clip=99.,zoom_rsun=1.6,eui_mode='intensity',`<br>`lc=None,lc_window=None,zoom_box=None,`<br>`zoom_track=False,metis_mode='rdiff',base=0)` | Writes one PNG per Metis image and returns the paths. (a) Metis with EUI intensity inside the occulter; (b) EUI magnified to ±`zoom_rsun` or to `zoom_box=[x0,x1,y0,y1]` (R☉), which with `zoom_track=True` follows solar differential rotation from the first frame; (c) the `lc` light curves over `lc_window`. `base` is the index of the base image for `'bdiff'`. |
+
+Run as a script, it writes `<outdir>_<metis_mode>-<eui_mode>/Metis_EUI_*.png` and an MP4 (name ends in `_zoombox` or `_zoomtrack` when a box is used).
+
+### `make_AIA_LASCO_overlay_frames.py` (SOHO/LASCO + SDO/AIA)
+
+| Function | Use |
+|---|---|
+| `fits_times(folder,sT,eT)` | `[(Time, path)]` of the FITS in `folder` (recursive) with DATE-OBS in [sT, eT], time-sorted. |
+| `get_aia_synoptic(times,wave,folder)` | Downloads the JSOC AIA synoptic file (1k, level 1.5, 2-min cadence) nearest each time into `folder` and returns the paths. |
+| `load_cor(path)` | Coronagraph Map (LASCO, COR1/COR2) in DN/s; non-positive pixels become NaN. |
+| `load_disk(path)` | EUV disk Map (AIA, EUVI) in DN/s. |
+| `to_grid(m,hdr,fac=1.)` | Like the SolO `to_grid`, with angles multiplied by `fac`. AIA angles are scaled by the solar-radius ratio so the SDO limb lies on the SOHO limb. |
+| `make_frames(lfiles,afiles,outdir,a_mode='rdiff',`<br>`b_mode='rdiff',base=0,npix=1000,diff_clip=99.,`<br>`disk_rsun=1.3,lc=None,lc_window=None,`<br>`inner_r=1.25,occ_rsun=None)` | Writes one PNG per coronagraph image and returns the paths. (a) coronagraph in `a_mode` with EUV intensity inside the occulter; (b) full-disk EUV to ±`disk_rsun` in `b_mode`; (c) the light curves. `inner_r` (R☉) is the radius of the EUV image shown inside the occulter; `occ_rsun` blanks the coronagraph inside that radius (occulter and diffraction ring). Instrument names, colormap and titles come from the FITS headers, so the same function serves STEREO. |
+
+As a script, `panels=[(a,b),...]` makes one movie per pair, in `<outdir>_<a>` (when a = b) or `<outdir>_<a>-<b>`.
+
+### `make_STEREO_EUVI_overlay_frames.py` (STEREO COR2 + EUVI)
+
+| Function | Use |
+|---|---|
+| `cor_files(folder,sT,eT)` | `[(Time, path)]` of the full-resolution COR2 FITS in [sT, eT] (the largest frame size in the folder); binned frames are skipped. |
+| `nearest(times,rows,maxdt)` | The path in `rows=[(Time,path)]` nearest each time, or `None` beyond `maxdt` s. |
+
+The script fetches EUVI (`euvi_wave`, every `euvi_dT` s) with `Multiwb_datamine.get_STEREO_imgs`, matches it to each COR2 image within `euvi_maxdt`, and draws the frames with `make_AIA_LASCO_overlay_frames.make_frames` (`inner_r`, `occ_rsun`; same `panels` and `base_time`).
+
+### Using the functions directly
+
+```python
+import make_SolO_overlay_frames as S
+mf=S.metis_files('SolO/Metis/metis_tb','2025-05-30T11:00','2025-05-30T12:30')
+ef=S.get_eui([S.dh._hdr_time(p) for p in mf],'SolO/EUI/fsi174','eui-fsi174-image',900)
+lc=S.light_curves('2025-05-30T07:00','2025-05-31T00:00','SolO/STIX',['4-10 keV','15-25 keV'],'GOES')
+S.make_frames(mf,ef,'my_frames',eui_mode='rdiff',lc=lc,lc_window=('2025-05-30T07:00','2025-05-31T00:00'),
+	zoom_box=[0.45,0.84,-0.76,0.13],zoom_track=True)
+```
+
+Run this from the event folder (or `os.chdir(basedir)` first), since the folder paths are relative.
 
 ## Key settings
 
@@ -179,7 +249,7 @@ Each flow run writes to `<outdir>/<auto-named folder><output_tag>/`:
 - `regions.csv`, `pfss_sources.csv`, `disk_sources.csv`, `parameters.json` (every render setting, plus `flow_input`, `flow_bin`, `colorbar_style`, `speed_limits_kms` / `speed_bins_kms` and `fastest_vector_kms`)
 - `structures_<time>_masks.npz`: detection masks
 
-The motion cache goes in `<outdir>/motion_cache/<name>/`. It holds the aligned differences, flow, `times.json` and the noise-model and flow state (`noise_scales.json` or `combined_scales.json`: `flow_input`, `flow_bin`), and can be reused for redraws. Caches are named `V1_<LASCO|craft>_<detector>_*`; CDAW caches are `V1_LASCO_C2_CDAW_*` (state `source='CDAW PNG'`), and `reuse_cache='latest'` picks a CDAW cache only when `use_CDAW_pngs=1`. Overlay makers write their frames and MP4 to `final_image_folder`, with intermediate images and logs in `outdir`.
+The motion cache goes in `<outdir>/motion_cache/<name>/`. It holds the aligned differences, flow, `times.json` and the noise-model and flow state (`noise_scales.json` or `combined_scales.json`: `flow_input`, `flow_bin`), and can be reused for redraws. Caches are named `V1_<LASCO|craft>_<detector>_*`; CDAW caches are `V1_LASCO_C2_CDAW_*` (state `source='CDAW PNG'`), and `reuse_cache='latest'` picks a CDAW cache only when `use_CDAW_pngs=1`. The PFSS overlay makers write their frames and MP4 to `final_image_folder`, with intermediate images and logs in `outdir`. The coronagraph + EUV makers write PNGs and the MP4 to one folder per panel choice, named from `outdir` plus the panel modes (see their section above).
 
 ## Example
 
@@ -212,4 +282,4 @@ python make_moving_structure_frames_STEREO_COR2_HI1.py
 - **COR2 + HI1 has no `flow_bin`**: its flow runs on the grid pixels (~0.1 R☉ at `npix=1024`).
 - **Solar Orbiter Metis** science data are public only at Level 2 (MSB), released with a long delay (complete to mid-2025 as of Nov 2026). L0/L1 and the Metis calibration pipeline are not public; bins without Level 2 use SOAR low-latency LL02 images (preliminary, "not for scientific analysis"), kept as their own family. The Metis field in solar radii scales with Solar Orbiter's distance (about 5–11 R☉ at 0.85 AU), so `r_inner`/`r_outer` default to the header field. There is no Helioviewer route for Solar Orbiter. Use `flow_input='base_difference'` (the SolO launcher default): on 2025-05-30 intensity input gave under 30 km/s for the NW CME, base-difference input 50–350 km/s, still limited by the 30-min Metis cadence. Metis MSB images are stored in the cache in units of 10⁻¹² MSB, because `flow` floors its feature scale at one input unit (LASCO Level-1 MSB input would hit the same floor).
 - **PSP/WISPR** data are public only after a delay. The WISPR maker stops with "No usable WISPR images" until they are released.
-- **Light curves:** the LAT light curve is supplied by the user (`user_datacsv`). GOES XRS-B is fetched automatically.
+- **Light curves:** the LAT light curve is supplied by the user (`user_datacsv`). GOES XRS-B is fetched automatically. STIX quick-look curves come from ESA SOAR (`Multiwb_datamine.get_STIX_LC`); they are disk-integrated counts, not background-subtracted, and are shifted to Earth light-arrival time to line up with GOES.
