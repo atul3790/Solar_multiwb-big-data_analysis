@@ -27,6 +27,7 @@ from astropy.constants import R_sun
 from astropy.coordinates import SkyCoord
 import sunpy.map
 from sunpy.coordinates import frames
+from sunpy.util.exceptions import NoMapsInFileError
 import solar_overlay_helper as oh
 from pfss_projection import ar_rooted_lines  # shared AR selection with the flow frames
 import solar_overlay as so
@@ -285,7 +286,7 @@ def scan_image_cache(folder,instrument,key,log_dir,lo,hi):
 					entries.append((m.date,usable,rank))
 					seen[identity]=usable
 				writer.writerow([path,m.date.isot,rank,usable])
-			except (OSError,ValueError,KeyError,TypeError,ImportError,RuntimeError) as exc:
+			except (OSError,ValueError,KeyError,TypeError,ImportError,RuntimeError,NoMapsInFileError) as exc:  # NoMapsInFileError: header-only archive file
 				print('Cannot read cached image:',path,';',exc)
 	entries.sort(key=lambda r:r[0].mjd)
 	print(f'{instrument}: {len(entries)} cached exposures in the requested window')
